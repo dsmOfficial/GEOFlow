@@ -14,6 +14,7 @@ use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\CatalogController;
 use App\Http\Controllers\Api\V1\JobController;
 use App\Http\Controllers\Api\V1\MaterialController;
+use App\Http\Controllers\Api\V1\SmartImportController;
 use App\Http\Controllers\Api\V1\TaskController;
 use Illuminate\Support\Facades\Route;
 
@@ -23,6 +24,10 @@ Route::prefix('v1')
     ->group(function (): void {
         // 公开：管理员登录，返回 API Token（无需 Bearer）
         Route::post('auth/login', [AuthController::class, 'login']);
+
+        // 公开：智能导入（无需认证）
+        Route::post('smart-import', [SmartImportController::class, 'store']);
+        Route::get('smart-import/{job}', [SmartImportController::class, 'show'])->whereNumber('job');
 
         // 需有效 Token + 对应 scope
         Route::middleware(['api.auth'])->group(function (): void {
