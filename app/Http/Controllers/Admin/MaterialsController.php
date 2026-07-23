@@ -35,6 +35,7 @@ class MaterialsController extends Controller
             'pageTitle' => __('admin.materials.page_title'),
             'activeMenu' => 'materials',
             'adminSiteName' => AdminWeb::siteName(),
+            'canManageProtectedWorkflows' => auth('admin')->user()?->canManageProtectedWorkflows() === true,
             'stats' => $this->loadStats(),
         ]);
     }
@@ -173,7 +174,11 @@ class MaterialsController extends Controller
 
         return KnowledgeBase::query()
             ->where('risk_level', 'high')
-            ->where('review_status', '<>', 'reviewed')
+            ->where(function ($query): void {
+                $query
+                    ->whereNull('review_status')
+                    ->orWhere('review_status', '<>', 'reviewed');
+            })
             ->count();
     }
 

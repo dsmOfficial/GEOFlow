@@ -6,6 +6,11 @@
     $selectedStatus = (string) ($filters['status'] ?? '');
     $selectedReviewStatus = (string) ($filters['review_status'] ?? '');
     $selectedAuthorId = (int) ($filters['author_id'] ?? 0);
+    $selectedDistributionChannelIds = collect($filters['distribution_channel_ids'] ?? [])
+        ->map(fn ($id) => (int) $id)
+        ->filter(fn ($id) => $id > 0)
+        ->values()
+        ->all();
     $selectedDateFrom = (string) ($filters['date_from'] ?? '');
     $selectedDateTo = (string) ($filters['date_to'] ?? '');
     $selectedSearch = (string) ($filters['search'] ?? '');
@@ -17,11 +22,58 @@
             break;
         }
     }
+    $articleListAnchor = '#article-list';
     $categoryManageUrl = route('admin.categories.index');
-    $reviewCenterUrl = route('admin.articles.index', ['review_status' => 'pending']);
+    $reviewCenterUrl = route('admin.articles.index', ['review_status' => 'pending']).$articleListAnchor;
     $trashUrl = route('admin.articles.index', ['trashed' => 1]);
     $articlesIndexUrl = route('admin.articles.index');
     $clearTaskFilterUrl = route('admin.articles.index', request()->except(['task_id', 'page']));
+    $contentWorkbenchItems = [
+        [
+            'icon' => 'shield-check',
+            'title' => __('admin.articles.workbench.review_title'),
+            'desc' => __('admin.articles.workbench.review_desc'),
+            'count' => (int) ($stats['pending_review'] ?? 0),
+            'href' => $reviewCenterUrl,
+            'iconClass' => 'bg-amber-50 text-amber-600 ring-amber-100',
+            'countClass' => 'text-amber-700',
+            'linkClass' => 'text-amber-700 group-hover:text-amber-800',
+        ],
+        [
+            'icon' => 'edit',
+            'title' => __('admin.articles.workbench.optimize_title'),
+            'desc' => __('admin.articles.workbench.optimize_desc'),
+            'count' => (int) ($stats['draft'] ?? 0),
+            'href' => route('admin.articles.index', ['status' => 'draft']).$articleListAnchor,
+            'iconClass' => 'bg-blue-50 text-blue-600 ring-blue-100',
+            'countClass' => 'text-blue-700',
+            'linkClass' => 'text-blue-700 group-hover:text-blue-800',
+        ],
+        [
+            'icon' => 'send',
+            'title' => __('admin.articles.workbench.distribution_title'),
+            'desc' => __('admin.articles.workbench.distribution_desc'),
+            'count' => (int) ($stats['published'] ?? 0),
+            'href' => route('admin.articles.index', ['status' => 'published']).$articleListAnchor,
+            'iconClass' => 'bg-emerald-50 text-emerald-600 ring-emerald-100',
+            'countClass' => 'text-emerald-700',
+            'linkClass' => 'text-emerald-700 group-hover:text-emerald-800',
+        ],
+        [
+            'icon' => 'chart-no-axes-combined',
+            'title' => __('admin.articles.workbench.observation_title'),
+            'desc' => __('admin.articles.workbench.observation_desc'),
+            'count' => (int) ($stats['observed'] ?? 0),
+            'href' => route('admin.analytics'),
+            'iconClass' => 'bg-purple-50 text-purple-600 ring-purple-100',
+            'countClass' => 'text-purple-700',
+            'linkClass' => 'text-purple-700 group-hover:text-purple-800',
+        ],
+    ];
+    $workbenchPriority = collect($contentWorkbenchItems)
+        ->sortByDesc(fn ($item) => (int) ($item['count'] ?? 0))
+        ->first();
+    $workbenchHasPriority = (int) ($workbenchPriority['count'] ?? 0) > 0;
 @endphp
 
 @section('content')
@@ -81,6 +133,68 @@
             </div>
         </div>
         @else
+        <section class="mb-8">
+            <div class="mb-4 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                <div>
+                    <p class="text-xs font-semibold uppercase tracking-wide text-blue-600">{{ __('admin.articles.workbench.eyebrow') }}</p>
+                    <h2 class="mt-1 text-xl font-semibold text-gray-900">{{ __('admin.articles.workbench.title') }}</h2>
+                    <p class="mt-1 max-w-4xl text-sm leading-6 text-gray-600">{{ __('admin.articles.workbench.desc') }}</p>
+                </div>
+                <a href="{{ route('admin.tasks.create') }}" class="inline-flex w-fit items-center rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100">
+                    <i data-lucide="workflow" class="mr-2 h-4 w-4"></i>
+                    {{ __('admin.articles.workbench.create_task') }}
+                </a>
+            </div>
+            <div class="mb-4 rounded-lg border border-blue-100 bg-white p-4 shadow-sm">
+                <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                    <div class="flex items-start gap-3">
+                        <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-md ring-1 {{ $workbenchHasPriority ? $workbenchPriority['iconClass'] : 'bg-blue-50 text-blue-600 ring-blue-100' }}">
+                            <i data-lucide="{{ $workbenchHasPriority ? $workbenchPriority['icon'] : 'circle-check' }}" class="h-5 w-5"></i>
+                        </div>
+                        <div>
+                            <p class="text-xs font-semibold uppercase tracking-wide text-blue-600">{{ __('admin.articles.workbench.current_action_title') }}</p>
+                            <h3 class="mt-1 text-base font-semibold text-gray-900">
+                                @if($workbenchHasPriority)
+                                    {{ __('admin.articles.workbench.current_action_desc', ['count' => (int) $workbenchPriority['count'], 'stage' => $workbenchPriority['title']]) }}
+                                @else
+                                    {{ __('admin.articles.workbench.current_action_empty_title') }}
+                                @endif
+                            </h3>
+                            <p class="mt-1 text-sm leading-6 text-gray-500">
+                                {{ $workbenchHasPriority ? __('admin.articles.workbench.current_action_help') : __('admin.articles.workbench.current_action_empty_desc') }}
+                            </p>
+                        </div>
+                    </div>
+                    <a href="{{ $workbenchHasPriority ? $workbenchPriority['href'] : route('admin.tasks.create') }}" class="inline-flex h-9 w-fit shrink-0 items-center rounded-md bg-blue-600 px-3 text-sm font-semibold text-white hover:bg-blue-700">
+                        {{ $workbenchHasPriority ? __('admin.articles.workbench.current_action_button') : __('admin.articles.workbench.current_action_empty_button') }}
+                        <i data-lucide="arrow-right" class="ml-1.5 h-4 w-4"></i>
+                    </a>
+                </div>
+            </div>
+            <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                @foreach ($contentWorkbenchItems as $item)
+                    <a href="{{ $item['href'] }}" class="group flex min-h-44 flex-col justify-between rounded-lg border border-gray-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md">
+                        <div>
+                            <div class="flex items-start justify-between gap-4">
+                                <div class="flex h-11 w-11 items-center justify-center rounded-md ring-1 {{ $item['iconClass'] }}">
+                                    <i data-lucide="{{ $item['icon'] }}" class="h-5 w-5"></i>
+                                </div>
+                                <div class="text-right">
+                                    <div class="text-2xl font-semibold {{ $item['countClass'] }}">{{ $item['count'] }}</div>
+                                </div>
+                            </div>
+                            <h3 class="mt-5 text-base font-semibold text-gray-900">{{ $item['title'] }}</h3>
+                            <p class="mt-2 text-sm leading-6 text-gray-500">{{ $item['desc'] }}</p>
+                        </div>
+                        <div class="mt-5 inline-flex items-center text-sm font-semibold {{ $item['linkClass'] }}">
+                            {{ __('admin.articles.workbench.open') }}
+                            <i data-lucide="arrow-right" class="ml-1.5 h-4 w-4 transition group-hover:translate-x-0.5"></i>
+                        </div>
+                    </a>
+                @endforeach
+            </div>
+        </section>
+
         <div class="grid grid-cols-1 md:grid-cols-5 gap-6 mb-8">
             <div class="bg-white overflow-hidden shadow rounded-lg">
                 <div class="p-5">
@@ -161,7 +275,7 @@
                     @if($isTrashView)
                         <input type="hidden" name="trashed" value="1">
                     @endif
-                    <div class="grid grid-cols-1 md:grid-cols-6 gap-4">
+                    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4">
                         <div>
                             <label class="block text-sm font-medium text-gray-700">{{ __('admin.articles.filters.task') }}</label>
                             <select name="task_id" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
@@ -210,6 +324,48 @@
                             <input type="date" name="date_to" value="{{ $selectedDateTo }}" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
                         </div>
                     </div>
+                    @if(!empty($distributionChannels))
+                        <div>
+                            <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+                                <label class="block text-sm font-medium text-gray-700">{{ __('admin.articles.filters.distribution_channel') }}</label>
+                                <div class="flex items-center gap-2">
+                                    <span data-distribution-channel-filter-count class="inline-flex items-center rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700">
+                                        {{ __('admin.articles.filters.distribution_channel_selected_count', ['count' => count($selectedDistributionChannelIds)]) }}
+                                    </span>
+                                    <button type="button"
+                                            data-distribution-channel-filter-toggle
+                                            aria-expanded="false"
+                                            class="inline-flex items-center rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 shadow-sm hover:bg-gray-50">
+                                        <span data-distribution-channel-filter-toggle-label>{{ __('admin.articles.filters.distribution_channel_expand') }}</span>
+                                        <i data-lucide="chevron-down" data-distribution-channel-filter-toggle-icon class="ml-1 h-3.5 w-3.5 transition-transform"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div data-distribution-channel-filter-panel class="hidden grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+                                @foreach($distributionChannels as $channel)
+                                    <label data-distribution-channel-filter-card @class([
+                                        'flex items-start gap-3 rounded-md border px-4 py-3 text-sm transition',
+                                        'border-blue-200 bg-blue-50' => in_array((int) ($channel['id'] ?? 0), $selectedDistributionChannelIds, true),
+                                        'border-gray-200 bg-white hover:border-blue-300 hover:bg-blue-50' => ! in_array((int) ($channel['id'] ?? 0), $selectedDistributionChannelIds, true),
+                                    ])>
+                                        <input type="checkbox"
+                                               name="distribution_channel_ids[]"
+                                               value="{{ (int) ($channel['id'] ?? 0) }}"
+                                               @checked(in_array((int) ($channel['id'] ?? 0), $selectedDistributionChannelIds, true))
+                                               data-distribution-channel-filter-input
+                                               class="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                                        <span class="min-w-0">
+                                            <span class="block font-medium text-gray-900">{{ $channel['name'] }}</span>
+                                            @if((string) ($channel['domain'] ?? '') !== '')
+                                                <span class="block break-all text-gray-500">{{ (string) ($channel['domain'] ?? '') }}</span>
+                                            @endif
+                                        </span>
+                                    </label>
+                                @endforeach
+                            </div>
+                            <p class="mt-2 text-xs text-gray-500">{{ __('admin.articles.filters.distribution_channel_help') }}</p>
+                        </div>
+                    @endif
                     <div class="flex items-end space-x-4">
                         <div class="flex-1">
                             <label class="block text-sm font-medium text-gray-700">{{ __('admin.articles.filters.search') }}</label>
@@ -230,7 +386,7 @@
             </div>
         </div>
 
-        <div class="bg-white shadow rounded-lg">
+        <div id="article-list" class="scroll-mt-24 bg-white shadow rounded-lg">
             <div class="px-6 py-4 border-b border-gray-200">
                 <div class="flex items-center justify-between">
                     <h3 class="text-lg font-medium text-gray-900">
@@ -279,7 +435,7 @@
                 </div>
             @else
                 <div id="batch-actions" class="hidden px-6 py-3 bg-gray-50 border-b border-gray-200">
-                    <form method="POST" action="{{ route('admin.articles.batch.update-status', [], false) }}" id="batch-form">
+                    <form method="POST" action="{{ \App\Support\AdminWeb::routePath('admin.articles.batch.update-status') }}" id="batch-form">
                         @csrf
                         <div id="batch-selected-ids"></div>
                         <div class="flex items-center space-x-4">
@@ -359,6 +515,66 @@
                                 $distributionSynced = (int) ($article->distribution_synced_count ?? 0);
                                 $distributionFailed = (int) ($article->distribution_failed_count ?? 0);
                                 $distributionPending = max(0, $distributionTotal - $distributionSynced - $distributionFailed);
+                                $articleDistributionChannels = collect($article->distributions ?? []);
+                                if (count($selectedDistributionChannelIds) > 0) {
+                                    $articleDistributionChannels = $articleDistributionChannels->filter(
+                                        fn ($distribution): bool => in_array((int) ($distribution->distribution_channel_id ?? 0), $selectedDistributionChannelIds, true)
+                                    );
+                                }
+                                $articleDistributionChannelLabels = $articleDistributionChannels
+                                    ->map(function ($distribution): string {
+                                        $channelName = (string) ($distribution->channel->name ?? '');
+                                        $channelDomain = (string) ($distribution->channel->domain ?? '');
+                                        if ($channelName !== '' && $channelDomain !== '') {
+                                            return $channelName.' · '.$channelDomain;
+                                        }
+
+                                        return $channelName !== '' ? $channelName : $channelDomain;
+                                    })
+                                    ->filter(fn (string $label): bool => $label !== '')
+                                    ->unique()
+                                    ->values();
+                                $remoteDistributions = collect($article->syncedRemoteDistributions ?? []);
+                                if (count($selectedDistributionChannelIds) > 0) {
+                                    $remoteDistributions = $remoteDistributions->filter(
+                                        fn ($distribution): bool => in_array((int) ($distribution->distribution_channel_id ?? 0), $selectedDistributionChannelIds, true)
+                                    );
+                                }
+                                $remoteViewLinks = $remoteDistributions
+                                    ->map(function ($distribution): array {
+                                        $remoteUrl = trim((string) ($distribution->remote_url ?? ''));
+                                        $channelName = (string) ($distribution->channel->name ?? '');
+                                        $channelDomain = (string) ($distribution->channel->domain ?? '');
+
+                                        return [
+                                            'url' => $remoteUrl,
+                                            'channel' => $channelName !== '' ? $channelName : ($channelDomain !== '' ? $channelDomain : __('admin.articles.action.remote_channel_unknown')),
+                                            'host' => (string) (parse_url($remoteUrl, PHP_URL_HOST) ?: $channelDomain),
+                                        ];
+                                    })
+                                    ->filter(function (array $link): bool {
+                                        $url = (string) ($link['url'] ?? '');
+                                        $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
+
+                                        return filter_var($url, FILTER_VALIDATE_URL) !== false
+                                            && in_array($scheme, ['http', 'https'], true);
+                                    })
+                                    ->values();
+                                $primaryRemoteLink = $remoteViewLinks->first();
+                                $localArticleUrl = null;
+                                if ((string) $article->status === 'published' && trim((string) $article->slug) !== '') {
+                                    $localArticleUrl = route('site.article', ['slug' => (string) $article->slug]);
+                                }
+                                $primaryPublishedLink = $primaryRemoteLink;
+                                if ($primaryPublishedLink === null && $localArticleUrl !== null) {
+                                    $primaryPublishedLink = [
+                                        'url' => $localArticleUrl,
+                                        'channel' => __('admin.articles.action.local_site'),
+                                        'title' => __('admin.articles.action.view_local'),
+                                    ];
+                                } elseif ($primaryPublishedLink !== null) {
+                                    $primaryPublishedLink['title'] = __('admin.articles.action.view_remote_for_channel', ['channel' => $primaryPublishedLink['channel']]);
+                                }
                                 $distributionBadge = null;
                                 if (!$isTrashView && $distributionTotal > 0) {
                                     if ($distributionFailed > 0) {
@@ -421,14 +637,31 @@
                                         </div>
                                     @endif
                                 </td>
-                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                    @if((string) ($article->task->name ?? '') !== '')
-                                        <div class="text-blue-600">{{ $article->task->name }}</div>
-                                    @endif
-                                    <div>{{ $article->author->name ?? '' }}</div>
-                                    @if((int) ($article->is_ai_generated ?? 0) === 1)
-                                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">{{ __('admin.articles.ai_generated') }}</span>
-                                    @endif
+                                <td class="px-6 py-4 text-sm text-gray-500">
+                                    <div class="space-y-1.5">
+                                        @if((string) ($article->task->name ?? '') !== '')
+                                            <div class="max-w-[220px] truncate font-medium text-blue-600" title="{{ $article->task->name }}">{{ $article->task->name }}</div>
+                                        @endif
+                                        <div class="text-gray-600">{{ $article->author->name ?? '' }}</div>
+                                        @if($articleDistributionChannelLabels->isNotEmpty())
+                                            <div class="flex max-w-[240px] flex-wrap gap-1.5">
+                                                @foreach($articleDistributionChannelLabels->take(3) as $channelLabel)
+                                                    <span class="inline-flex max-w-full items-center rounded-full bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-600 ring-1 ring-slate-200" title="{{ $channelLabel }}">
+                                                        <i data-lucide="radio-tower" class="mr-1 h-3 w-3 shrink-0"></i>
+                                                        <span class="max-w-[170px] truncate">{{ $channelLabel }}</span>
+                                                    </span>
+                                                @endforeach
+                                                @if($articleDistributionChannelLabels->count() > 3)
+                                                    <span class="inline-flex items-center rounded-full bg-gray-50 px-2 py-0.5 text-xs font-medium text-gray-500 ring-1 ring-gray-200">
+                                                        +{{ $articleDistributionChannelLabels->count() - 3 }}
+                                                    </span>
+                                                @endif
+                                            </div>
+                                        @endif
+                                        @if((int) ($article->is_ai_generated ?? 0) === 1)
+                                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">{{ __('admin.articles.ai_generated') }}</span>
+                                        @endif
+                                    </div>
                                 </td>
                                 @if(!$isTrashView)
                                 <td class="px-6 py-4 whitespace-nowrap">
@@ -471,6 +704,15 @@
                                         </div>
                                     @else
                                         <div class="flex items-center space-x-2">
+                                            @if($primaryPublishedLink !== null)
+                                                <a href="{{ $primaryPublishedLink['url'] }}" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:text-blue-800" title="{{ $primaryPublishedLink['title'] }}">
+                                                    <i data-lucide="external-link" class="w-4 h-4"></i>
+                                                </a>
+                                            @else
+                                                <span class="inline-flex cursor-not-allowed text-gray-300" title="{{ __('admin.articles.action.view_remote_unavailable') }}">
+                                                    <i data-lucide="eye-off" class="w-4 h-4"></i>
+                                                </span>
+                                            @endif
                                             <a href="{{ route('admin.articles.edit', ['articleId' => (int) $article->id]) }}" class="text-green-600 hover:text-green-800" title="{{ __('admin.button.edit') }}">
                                                 <i data-lucide="edit" class="w-4 h-4"></i>
                                             </a>
@@ -505,7 +747,13 @@
                         <div class="flex items-center gap-2">
                             <form method="GET" class="flex items-center gap-2">
                                 @foreach(request()->except(['per_page', 'page']) as $key => $value)
-                                    <input type="hidden" name="{{ $key }}" value="{{ $value }}">
+                                    @if(is_array($value))
+                                        @foreach($value as $arrayValue)
+                                            <input type="hidden" name="{{ $key }}[]" value="{{ $arrayValue }}">
+                                        @endforeach
+                                    @else
+                                        <input type="hidden" name="{{ $key }}" value="{{ $value }}">
+                                    @endif
                                 @endforeach
                                 <input type="hidden" name="page" value="1">
                                 <label for="per-page-input" class="text-sm text-gray-600">{{ __('admin.articles.pagination.per_page') }}</label>
@@ -528,7 +776,10 @@
         const ARTICLES_I18N = @json($articlesI18n);
         const TRASH_I18N = @json($trashI18n);
         const IS_TRASH_VIEW = @json($isTrashView);
-        const EMPTY_TRASH_URL = @json(route('admin.articles.trash.empty', [], false));
+        const EMPTY_TRASH_URL = @json(\App\Support\AdminWeb::routePath('admin.articles.trash.empty'));
+        const DISTRIBUTION_CHANNEL_FILTER_COUNT_LABEL = @json(__('admin.articles.filters.distribution_channel_selected_count', ['count' => '__COUNT__']));
+        const DISTRIBUTION_CHANNEL_FILTER_EXPAND_LABEL = @json(__('admin.articles.filters.distribution_channel_expand'));
+        const DISTRIBUTION_CHANNEL_FILTER_COLLAPSE_LABEL = @json(__('admin.articles.filters.distribution_channel_collapse'));
 
         function toggleBatchActions() {
             const batchActions = document.getElementById('batch-actions');
@@ -618,6 +869,59 @@
         }
 
         document.addEventListener('DOMContentLoaded', function() {
+            const distributionChannelFilterInputs = document.querySelectorAll('[data-distribution-channel-filter-input]');
+            const distributionChannelFilterCount = document.querySelector('[data-distribution-channel-filter-count]');
+            const distributionChannelFilterPanel = document.querySelector('[data-distribution-channel-filter-panel]');
+            const distributionChannelFilterToggle = document.querySelector('[data-distribution-channel-filter-toggle]');
+            const distributionChannelFilterToggleLabel = document.querySelector('[data-distribution-channel-filter-toggle-label]');
+            const distributionChannelFilterToggleIcon = document.querySelector('[data-distribution-channel-filter-toggle-icon]');
+
+            function setDistributionChannelFilterExpanded(isExpanded) {
+                if (!distributionChannelFilterPanel || !distributionChannelFilterToggle) {
+                    return;
+                }
+
+                distributionChannelFilterPanel.classList.toggle('hidden', !isExpanded);
+                distributionChannelFilterToggle.setAttribute('aria-expanded', isExpanded ? 'true' : 'false');
+                if (distributionChannelFilterToggleLabel) {
+                    distributionChannelFilterToggleLabel.textContent = isExpanded
+                        ? DISTRIBUTION_CHANNEL_FILTER_COLLAPSE_LABEL
+                        : DISTRIBUTION_CHANNEL_FILTER_EXPAND_LABEL;
+                }
+                distributionChannelFilterToggleIcon?.classList.toggle('rotate-180', isExpanded);
+            }
+
+            function syncDistributionChannelFilterState() {
+                const selectedCount = Array.from(distributionChannelFilterInputs).filter((input) => input.checked).length;
+                if (distributionChannelFilterCount) {
+                    distributionChannelFilterCount.textContent = DISTRIBUTION_CHANNEL_FILTER_COUNT_LABEL.replace('__COUNT__', String(selectedCount));
+                }
+
+                distributionChannelFilterInputs.forEach((input) => {
+                    const card = input.closest('[data-distribution-channel-filter-card]');
+                    if (!card) {
+                        return;
+                    }
+
+                    const isSelected = input.checked;
+                    card.classList.toggle('border-blue-200', isSelected);
+                    card.classList.toggle('bg-blue-50', isSelected);
+                    card.classList.toggle('border-gray-200', !isSelected);
+                    card.classList.toggle('bg-white', !isSelected);
+                    card.classList.toggle('hover:border-blue-300', !isSelected);
+                    card.classList.toggle('hover:bg-blue-50', !isSelected);
+                });
+            }
+
+            distributionChannelFilterInputs.forEach((input) => {
+                input.addEventListener('change', syncDistributionChannelFilterState);
+            });
+            distributionChannelFilterToggle?.addEventListener('click', function() {
+                setDistributionChannelFilterExpanded(this.getAttribute('aria-expanded') !== 'true');
+            });
+            setDistributionChannelFilterExpanded(false);
+            syncDistributionChannelFilterState();
+
             const selectAll = document.getElementById('select-all');
             if (selectAll) {
                 selectAll.addEventListener('change', function() {

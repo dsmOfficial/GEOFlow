@@ -13,15 +13,18 @@ use App\Http\Controllers\Admin\AiPromptController;
 use App\Http\Controllers\Admin\AiSpecialPromptController;
 use App\Http\Controllers\Admin\AnalyticsController;
 use App\Http\Controllers\Admin\ApiTokenController;
-use App\Http\Controllers\Admin\ArticleEditorAssetController;
 use App\Http\Controllers\Admin\ArticleController;
+use App\Http\Controllers\Admin\ArticleEditorAssetController;
 use App\Http\Controllers\Admin\AuthorController;
 use App\Http\Controllers\Admin\CategoryController;
 use App\Http\Controllers\Admin\DashboardController;
 use App\Http\Controllers\Admin\DistributionController;
+use App\Http\Controllers\Admin\EnterpriseKnowledgeController;
 use App\Http\Controllers\Admin\ImageLibraryController;
 use App\Http\Controllers\Admin\KeywordLibraryController;
 use App\Http\Controllers\Admin\KnowledgeBaseController;
+use App\Http\Controllers\Admin\LeadController;
+use App\Http\Controllers\Admin\LeadFormController;
 use App\Http\Controllers\Admin\LegacyController;
 use App\Http\Controllers\Admin\MaterialsController;
 use App\Http\Controllers\Admin\SecuritySettingsController;
@@ -35,6 +38,7 @@ use App\Http\Controllers\Site\ArchiveController;
 use App\Http\Controllers\Site\ArticleController as SiteArticleController;
 use App\Http\Controllers\Site\CategoryController as SiteCategoryController;
 use App\Http\Controllers\Site\HomeController;
+use App\Http\Controllers\Site\LeadFormController as SiteLeadFormController;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
 
@@ -46,6 +50,10 @@ Route::middleware(['site.locale', 'site.view_log'])->group(function (): void {
         ->where(['year' => '[0-9]{4}', 'month' => '[0-9]{2}']);
     Route::get('/category/{slug}', [SiteCategoryController::class, 'show'])->name('site.category');
     Route::get('/article/{slug}', [SiteArticleController::class, 'show'])->name('site.article');
+    Route::get('/forms/{slug}', [SiteLeadFormController::class, 'show'])->name('site.lead-forms.show');
+    Route::post('/forms/{slug}/submissions', [SiteLeadFormController::class, 'submit'])
+        ->middleware('throttle:10,1')
+        ->name('site.lead-forms.submit');
 });
 
 $adminPrefix = trim((string) config('geoflow.admin_base_path', '/geo_admin'), '/');
@@ -92,6 +100,22 @@ Route::prefix($adminPrefix)->name('admin.')->middleware(['admin.locale'])->group
             Route::post('backups/{backupUuid}/rollback', [SystemUpdateController::class, 'rollback'])->name('rollback');
         });
 
+        Route::prefix('lead-forms')->name('lead-forms.')->group(function () {
+            Route::get('/', [LeadFormController::class, 'index'])->name('index');
+            Route::get('create', [LeadFormController::class, 'create'])->name('create');
+            Route::post('/', [LeadFormController::class, 'store'])->name('store');
+            Route::get('{formId}/edit', [LeadFormController::class, 'edit'])->name('edit')->whereNumber('formId');
+            Route::put('{formId}', [LeadFormController::class, 'update'])->name('update')->whereNumber('formId');
+            Route::post('{formId}/toggle-status', [LeadFormController::class, 'toggleStatus'])->name('toggle-status')->whereNumber('formId');
+            Route::post('{formId}/delete', [LeadFormController::class, 'destroy'])->name('delete')->whereNumber('formId');
+        });
+        Route::prefix('leads')->name('leads.')->group(function () {
+            Route::get('/', [LeadController::class, 'index'])->name('index');
+            Route::get('export', [LeadController::class, 'export'])->name('export');
+            Route::get('{submissionId}', [LeadController::class, 'show'])->name('show')->whereNumber('submissionId');
+            Route::put('{submissionId}', [LeadController::class, 'update'])->name('update')->whereNumber('submissionId');
+        });
+
         // 任务管理（Blade 新路径）
         Route::prefix('tasks')->name('tasks.')->group(function () {
             Route::get('/', [TaskController::class, 'index'])->name('index');
@@ -106,15 +130,23 @@ Route::prefix($adminPrefix)->name('admin.')->middleware(['admin.locale'])->group
         });
 
         // 分发管理：集中管理外部站点 Agent 与文章分发队列
-        Route::prefix('distribution')->name('distribution.')->group(function () {
+        Route::prefix('distribution')->name('distribution.')->middleware('admin.super')->group(function () {
             Route::get('/', [DistributionController::class, 'index'])->name('index');
             Route::get('create', [DistributionController::class, 'create'])->name('create');
             Route::post('create', [DistributionController::class, 'store'])->name('store');
             Route::get('jobs', [DistributionController::class, 'jobs'])->name('jobs');
+            Route::get('sync-settings-all/preview', [DistributionController::class, 'previewSyncSettingsAll'])->name('sync-settings-all.preview');
+            Route::post('sync-settings-all', [DistributionController::class, 'syncSettingsAll'])->name('sync-settings-all');
+            Route::post('sync-settings-selected/preview', [DistributionController::class, 'previewSyncSettingsSelected'])->name('sync-settings-selected.preview');
+            Route::post('sync-settings-selected', [DistributionController::class, 'syncSettingsSelected'])->name('sync-settings-selected');
             Route::get('jobs/{distributionId}/edit', [DistributionController::class, 'editArticle'])->name('article.edit')->whereNumber('distributionId');
             Route::put('jobs/{distributionId}', [DistributionController::class, 'updateArticle'])->name('article.update')->whereNumber('distributionId');
             Route::post('jobs/{distributionId}/delete', [DistributionController::class, 'deleteArticle'])->name('article.delete')->whereNumber('distributionId');
             Route::post('jobs/{distributionId}/retry', [DistributionController::class, 'retry'])->name('retry')->whereNumber('distributionId');
+            Route::get('{channelId}/delete', [DistributionController::class, 'deletePreview'])->middleware('admin.super')->name('delete')->whereNumber('channelId');
+            Route::post('{channelId}/delete/prepare', [DistributionController::class, 'prepareDelete'])->middleware('admin.super')->name('delete.prepare')->whereNumber('channelId');
+            Route::post('{channelId}/delete/cancel', [DistributionController::class, 'cancelDelete'])->middleware('admin.super')->name('delete.cancel')->whereNumber('channelId');
+            Route::delete('{channelId}', [DistributionController::class, 'destroy'])->middleware(['admin.super', 'throttle:admin-sensitive'])->name('destroy')->whereNumber('channelId');
             Route::get('{channelId}/edit', [DistributionController::class, 'edit'])->name('edit')->whereNumber('channelId');
             Route::put('{channelId}', [DistributionController::class, 'update'])->name('update')->whereNumber('channelId');
             Route::post('{channelId}/pause', [DistributionController::class, 'pause'])->name('pause')->whereNumber('channelId');
@@ -122,6 +154,8 @@ Route::prefix($adminPrefix)->name('admin.')->middleware(['admin.locale'])->group
             Route::post('{channelId}/rotate-secret', [DistributionController::class, 'rotateSecret'])->name('rotate-secret')->whereNumber('channelId');
             Route::post('{channelId}/reveal-secret', [DistributionController::class, 'revealSecret'])->name('reveal-secret')->whereNumber('channelId');
             Route::post('{channelId}/download-package', [DistributionController::class, 'downloadPackage'])->name('download-package')->whereNumber('channelId');
+            Route::post('{channelId}/frontend-capabilities/refresh', [DistributionController::class, 'refreshFrontendCapabilities'])->name('frontend-capabilities.refresh')->whereNumber('channelId');
+            Route::get('{channelId}/sync-settings/preview', [DistributionController::class, 'previewSyncSettings'])->name('sync-settings.preview')->whereNumber('channelId');
             Route::post('{channelId}/sync-settings', [DistributionController::class, 'syncSettings'])->name('sync-settings')->whereNumber('channelId');
             Route::get('{channelId}', [DistributionController::class, 'show'])->name('show')->whereNumber('channelId');
             Route::post('{channelId}/health', [DistributionController::class, 'health'])->name('health')->whereNumber('channelId');
@@ -142,6 +176,7 @@ Route::prefix($adminPrefix)->name('admin.')->middleware(['admin.locale'])->group
             Route::post('{articleId}/restore', [ArticleController::class, 'restore'])->name('restore')->whereNumber('articleId');
             Route::post('{articleId}/force-delete', [ArticleController::class, 'forceDelete'])->name('force-delete')->whereNumber('articleId');
             Route::get('{articleId}/edit', [ArticleController::class, 'edit'])->name('edit');
+            Route::post('{articleId}/risk-scan', [ArticleController::class, 'recheckRisk'])->name('risk-scan')->whereNumber('articleId');
             Route::post('{articleId}/editor/images/upload', [ArticleEditorAssetController::class, 'uploadImage'])->name('editor.images.upload')->whereNumber('articleId');
             Route::put('{articleId}', [ArticleController::class, 'update'])->name('update');
         });
@@ -226,23 +261,43 @@ Route::prefix($adminPrefix)->name('admin.')->middleware(['admin.locale'])->group
             Route::post('{knowledgeBaseId}/delete', [KnowledgeBaseController::class, 'destroy'])->name('delete');
         });
 
+        Route::prefix('enterprise-knowledge')->name('enterprise-knowledge.')->group(function () {
+            Route::get('/', [EnterpriseKnowledgeController::class, 'index'])->name('index');
+            Route::get('create', [EnterpriseKnowledgeController::class, 'create'])->name('create');
+            Route::post('create', [EnterpriseKnowledgeController::class, 'store'])->name('store');
+            Route::get('{projectId}/status', [EnterpriseKnowledgeController::class, 'status'])->name('status')->whereNumber('projectId');
+            Route::post('{projectId}/editor/images/upload', [EnterpriseKnowledgeController::class, 'uploadImage'])
+                ->name('editor.images.upload')
+                ->whereNumber('projectId');
+            Route::get('{projectId}', [EnterpriseKnowledgeController::class, 'show'])->name('show')->whereNumber('projectId');
+            Route::post('{projectId}/autosave', [EnterpriseKnowledgeController::class, 'autosave'])->name('autosave')->whereNumber('projectId');
+            Route::post('{projectId}/validate', [EnterpriseKnowledgeController::class, 'validateDraft'])->name('validate')->whereNumber('projectId');
+            Route::post('{projectId}/revisions/{revisionId}/restore', [EnterpriseKnowledgeController::class, 'restoreRevision'])
+                ->name('revisions.restore')
+                ->whereNumber(['projectId', 'revisionId']);
+            Route::post('{projectId}/publish', [EnterpriseKnowledgeController::class, 'publish'])->name('publish')->whereNumber('projectId');
+            Route::post('{projectId}/delete', [EnterpriseKnowledgeController::class, 'destroy'])->name('delete')->whereNumber('projectId');
+        });
+
         // 业务页面
         Route::get('materials', [MaterialsController::class, 'index'])->name('materials.index');
-        Route::get('url-import', [UrlImportController::class, 'index'])->name('url-import');
-        Route::post('url-import', [UrlImportController::class, 'store'])->name('url-import.store');
-        Route::get('url-import/history', [UrlImportController::class, 'history'])->name('url-import.history');
-        Route::post('url-import/{jobId}/run', [UrlImportController::class, 'run'])
-            ->name('url-import.run')
-            ->whereNumber('jobId');
-        Route::get('url-import/{jobId}/status', [UrlImportController::class, 'status'])
-            ->name('url-import.status')
-            ->whereNumber('jobId');
-        Route::post('url-import/{jobId}/commit', [UrlImportController::class, 'commit'])
-            ->name('url-import.commit')
-            ->whereNumber('jobId');
-        Route::get('url-import/{jobId}', [UrlImportController::class, 'show'])
-            ->name('url-import.show')
-            ->whereNumber('jobId');
+        Route::middleware('admin.super')->group(function () {
+            Route::get('url-import', [UrlImportController::class, 'index'])->name('url-import');
+            Route::post('url-import', [UrlImportController::class, 'store'])->name('url-import.store');
+            Route::get('url-import/history', [UrlImportController::class, 'history'])->name('url-import.history');
+            Route::post('url-import/{jobId}/run', [UrlImportController::class, 'run'])
+                ->name('url-import.run')
+                ->whereNumber('jobId');
+            Route::get('url-import/{jobId}/status', [UrlImportController::class, 'status'])
+                ->name('url-import.status')
+                ->whereNumber('jobId');
+            Route::post('url-import/{jobId}/commit', [UrlImportController::class, 'commit'])
+                ->name('url-import.commit')
+                ->whereNumber('jobId');
+            Route::get('url-import/{jobId}', [UrlImportController::class, 'show'])
+                ->name('url-import.show')
+                ->whereNumber('jobId');
+        });
 
         // AI 配置模块（配置器 / 模型 / 提示词）
         Route::group([], function () {
@@ -269,54 +324,67 @@ Route::prefix($adminPrefix)->name('admin.')->middleware(['admin.locale'])->group
             Route::get('/', [SiteSettingsController::class, 'index'])->name('index');
             Route::post('/', [SiteSettingsController::class, 'update'])->name('update');
             Route::post('theme', [SiteSettingsController::class, 'updateTheme'])->name('theme');
-            Route::get('theme-replications/create', [SiteThemeReplicationController::class, 'create'])->name('theme-replications.create');
-            Route::post('theme-replications', [SiteThemeReplicationController::class, 'store'])->name('theme-replications.store');
-            Route::get('theme-replications/{replicationId}', [SiteThemeReplicationController::class, 'show'])
-                ->name('theme-replications.show')
-                ->whereNumber('replicationId');
-            Route::get('theme-replications/{replicationId}/status', [SiteThemeReplicationController::class, 'status'])
-                ->name('theme-replications.status')
-                ->whereNumber('replicationId');
-            Route::get('theme-replications/{replicationId}/preview/{page}', [SiteThemeReplicationController::class, 'preview'])
-                ->name('theme-replications.preview')
-                ->whereNumber('replicationId')
-                ->whereIn('page', ['home', 'category', 'article']);
-            Route::get('theme-replications/{replicationId}/assets/{assetPath}', [SiteThemeReplicationController::class, 'asset'])
-                ->name('theme-replications.assets')
-                ->whereNumber('replicationId')
-                ->where('assetPath', '.*');
-            Route::post('theme-replications/{replicationId}/retry', [SiteThemeReplicationController::class, 'retry'])
-                ->name('theme-replications.retry')
-                ->whereNumber('replicationId');
-            Route::post('theme-replications/{replicationId}/iterate', [SiteThemeReplicationController::class, 'iterate'])
-                ->name('theme-replications.iterate')
-                ->whereNumber('replicationId');
-            Route::post('theme-replications/{replicationId}/publish', [SiteThemeReplicationController::class, 'publish'])
-                ->name('theme-replications.publish')
-                ->whereNumber('replicationId');
-            Route::post('theme-replications/{replicationId}/copy', [SiteThemeReplicationController::class, 'copy'])
-                ->name('theme-replications.copy')
-                ->whereNumber('replicationId');
-            Route::post('theme-replications/{replicationId}/archive', [SiteThemeReplicationController::class, 'archive'])
-                ->name('theme-replications.archive')
-                ->whereNumber('replicationId');
-            Route::post('theme-replications/{replicationId}/drafts/delete', [SiteThemeReplicationController::class, 'deleteDrafts'])
-                ->name('theme-replications.delete-drafts')
-                ->whereNumber('replicationId');
-            Route::get('theme-replications/{replicationId}/package', [SiteThemeReplicationController::class, 'downloadPackage'])
-                ->name('theme-replications.package')
-                ->whereNumber('replicationId');
+            Route::post('homepage-modules', [SiteSettingsController::class, 'updateHomepageModules'])->name('homepage-modules');
+            Route::post('homepage-modules/preset', [SiteSettingsController::class, 'applyHomepageModulePreset'])->name('homepage-modules.preset');
+            Route::post('homepage-modules/import', [SiteSettingsController::class, 'importHomepageModuleDesign'])->name('homepage-modules.import');
+            Route::middleware('admin.super')->group(function () {
+                Route::get('theme-replications/create', [SiteThemeReplicationController::class, 'create'])->name('theme-replications.create');
+                Route::post('theme-replications', [SiteThemeReplicationController::class, 'store'])->name('theme-replications.store');
+                Route::get('theme-replications/{replicationId}', [SiteThemeReplicationController::class, 'show'])
+                    ->name('theme-replications.show')
+                    ->whereNumber('replicationId');
+                Route::get('theme-replications/{replicationId}/status', [SiteThemeReplicationController::class, 'status'])
+                    ->name('theme-replications.status')
+                    ->whereNumber('replicationId');
+                Route::get('theme-replications/{replicationId}/preview/{page}', [SiteThemeReplicationController::class, 'preview'])
+                    ->name('theme-replications.preview')
+                    ->whereNumber('replicationId')
+                    ->whereIn('page', ['home', 'category', 'article']);
+                Route::post('theme-replications/{replicationId}/retry', [SiteThemeReplicationController::class, 'retry'])
+                    ->name('theme-replications.retry')
+                    ->whereNumber('replicationId');
+                Route::post('theme-replications/{replicationId}/iterate', [SiteThemeReplicationController::class, 'iterate'])
+                    ->name('theme-replications.iterate')
+                    ->whereNumber('replicationId');
+                Route::post('theme-replications/{replicationId}/publish', [SiteThemeReplicationController::class, 'publish'])
+                    ->name('theme-replications.publish')
+                    ->whereNumber('replicationId');
+                Route::post('theme-replications/{replicationId}/copy', [SiteThemeReplicationController::class, 'copy'])
+                    ->name('theme-replications.copy')
+                    ->whereNumber('replicationId');
+                Route::post('theme-replications/{replicationId}/archive', [SiteThemeReplicationController::class, 'archive'])
+                    ->name('theme-replications.archive')
+                    ->whereNumber('replicationId');
+                Route::post('theme-replications/{replicationId}/drafts/delete', [SiteThemeReplicationController::class, 'deleteDrafts'])
+                    ->name('theme-replications.delete-drafts')
+                    ->whereNumber('replicationId');
+                Route::get('theme-replications/{replicationId}/package', [SiteThemeReplicationController::class, 'downloadPackage'])
+                    ->name('theme-replications.package')
+                    ->whereNumber('replicationId');
+            });
             Route::post('article-detail-ads', [SiteSettingsController::class, 'updateArticleDetailAds'])->name('ads');
+            Route::post('article-detail-text-ads', [SiteSettingsController::class, 'updateArticleDetailTextAds'])->name('text-ads');
             Route::get('sensitive-words', [SecuritySettingsController::class, 'index'])->name('sensitive-words');
-            Route::post('sensitive-words', [SecuritySettingsController::class, 'storeSensitiveWords'])->name('sensitive-words.store');
+            Route::post('sensitive-words', [SecuritySettingsController::class, 'storeSensitiveWords'])
+                ->middleware('admin.super')
+                ->name('sensitive-words.store');
+            Route::put('sensitive-words/{wordId}', [SecuritySettingsController::class, 'updateSensitiveWord'])
+                ->middleware('admin.super')
+                ->name('sensitive-words.update')
+                ->whereNumber('wordId');
             Route::post('sensitive-words/{wordId}/delete', [SecuritySettingsController::class, 'destroySensitiveWord'])
+                ->middleware('admin.super')
                 ->name('sensitive-words.delete')
                 ->whereNumber('wordId');
         });
         Route::prefix('security-settings')->name('security-settings.')->group(function () {
             Route::get('/', fn () => redirect()->route('admin.site-settings.sensitive-words'))->name('index');
-            Route::post('sensitive-words', [SecuritySettingsController::class, 'storeSensitiveWords'])->name('words.store');
-            Route::post('sensitive-words/{wordId}/delete', [SecuritySettingsController::class, 'destroySensitiveWord'])->name('words.delete');
+            Route::post('sensitive-words', [SecuritySettingsController::class, 'storeSensitiveWords'])
+                ->middleware('admin.super')
+                ->name('words.store');
+            Route::post('sensitive-words/{wordId}/delete', [SecuritySettingsController::class, 'destroySensitiveWord'])
+                ->middleware('admin.super')
+                ->name('words.delete');
             Route::post('password', [SecuritySettingsController::class, 'updatePassword'])->name('password.update');
         });
 

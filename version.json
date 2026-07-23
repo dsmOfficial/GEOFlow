@@ -1,17 +1,17 @@
 {
-  "version": "2.0.4",
-  "release_date": "2026-06-02",
+  "version": "2.1.1",
+  "release_date": "2026-07-17",
   "release_type": "patch",
-  "archive_url": "https://github.com/yaojingang/GEOFlow/archive/refs/heads/main.zip",
+  "archive_url": "https://github.com/yaojingang/GEOFlow/archive/refs/tags/v2.1.1.zip",
   "payload": {
-    "title_zh": "GEOFlow v2.0.4",
-    "title_en": "GEOFlow v2.0.4",
-    "summary_zh": "GEOFlow 2.0.4 修复已部署环境中后台版本号被 .env 固定的问题，系统版本默认跟随本地 version.json，更新中心可正确对比本地与 GitHub 最新版本。",
-    "summary_en": "GEOFlow 2.0.4 fixes stale admin versions in deployed environments by reading the local version.json by default, allowing the Update Center to compare the local version with the latest GitHub version correctly.",
-    "upgrade_tip_zh": "升级后建议执行 php artisan optimize 重新生成配置缓存；如果旧 .env 中仍保留 GEOFLOW_APP_VERSION，可无需再维护该项，系统版本会以本地 version.json 为准。",
-    "upgrade_tip_en": "After upgrading, run php artisan optimize to rebuild cached configuration. If an old .env still contains GEOFLOW_APP_VERSION, it no longer needs to be maintained because the app version now follows local version.json.",
-    "release_url": "https://github.com/yaojingang/GEOFlow",
-    "changelog_url_zh": "https://github.com/yaojingang/GEOFlow/blob/main/docs/CHANGELOG.md",
-    "changelog_url_en": "https://github.com/yaojingang/GEOFlow/blob/main/docs/CHANGELOG_en.md"
+    "title_zh": "GEOFlow v2.1.1",
+    "title_en": "GEOFlow v2.1.1",
+    "summary_zh": "GEOFlow 2.1.1 修复结构化数据注入、受管图片文件边界、出站请求 SSRF 与管理权限问题，并关闭可执行主题在线编辑，加入隔离预览、package-only 交付和只读安全审计。",
+    "summary_en": "GEOFlow 2.1.1 fixes structured-data injection, managed image file-boundary, outbound SSRF, and admin authorization issues; it also disables executable live theme editing and adds isolated previews, package-only delivery, and a read-only security audit.",
+    "upgrade_tip_zh": "升级时先保持图片删除门禁关闭并停机排空旧进程，设置一次性确认后执行 php artisan migrate；启动新代码，运行 php artisan geoflow:managed-images:readiness 与 php artisan geoflow:security-audit，确认就绪后再启用图片删除门禁并重启 queue worker。",
+    "upgrade_tip_en": "Keep the managed image deletion gate disabled, drain old processes, set the one-time confirmation, and run php artisan migrate. Start the new code, run php artisan geoflow:managed-images:readiness and php artisan geoflow:security-audit, then enable deletion only after readiness is confirmed and restart queue workers.",
+    "release_url": "https://github.com/yaojingang/GEOFlow/releases/tag/v2.1.1",
+    "changelog_url_zh": "https://github.com/yaojingang/GEOFlow/blob/v2.1.1/docs/CHANGELOG.md",
+    "changelog_url_en": "https://github.com/yaojingang/GEOFlow/blob/v2.1.1/docs/CHANGELOG_en.md"
   }
 }

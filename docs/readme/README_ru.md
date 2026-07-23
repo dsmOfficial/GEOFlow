@@ -4,7 +4,7 @@
 
 > GEOFlow — открытая система контент-инжиниринга GEO (Generative Engine Optimization) и мультисайтовой дистрибуции. Она объединяет базы знаний, библиотеки материалов, промпты, AI-задачи, ревью и публикацию, аналитику, пакеты целевых сайтов GEOFlow Agent, каналы WordPress REST, универсальные HTTP API-каналы и удалённую статическую публикацию в единый управляемый поток, который превращает достоверные материалы в публикуемые, отслеживаемые и распределяемые GEO-активы.
 
-[![PHP](https://img.shields.io/badge/PHP-8.2%2B-blue)](https://www.php.net/)
+[![PHP](https://img.shields.io/badge/PHP-8.3%2B-blue)](https://www.php.net/)
 [![PostgreSQL](https://img.shields.io/badge/Database-PostgreSQL-336791)](https://www.postgresql.org/)
 [![Docker](https://img.shields.io/badge/Docker-Compose-blue)](https://docs.docker.com/compose/)
 [![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](../../LICENSE)
@@ -181,7 +181,7 @@ docker compose up -d
 - Сайт: `http://localhost:18080` (порт **`APP_PORT`**, по умолчанию `18080`)  
 - Админка: `http://localhost:18080/geo_admin/login` (**`ADMIN_BASE_PATH`**, по умолчанию `geo_admin`)  
 
-При **`docker-compose.yml`** сервис **`init`** после готовности БД выполняет первую миграцию и `db:seed` (учётная запись по умолчанию — см. таблицу ниже).
+При **`docker-compose.yml`** сервис **`init`** после готовности БД выполняет миграцию и `php artisan geoflow:install`; начальные данные записываются только для пустой базы (учётная запись по умолчанию — см. таблицу ниже).
 
 ### Дополнение: Docker (продакшен)
 
@@ -198,12 +198,12 @@ docker compose --env-file .env.prod -f docker-compose.prod.yml up -d app web que
 ```
 
 - Фронт и админка идут через `web` (Nginx), PHP — контейнер `app` (php-fpm).
-- **Учётная запись по умолчанию:** production-сервис `init` запускает `db:seed` после миграций и создаёт начальную admin-учётную запись; повторный запуск не перезаписывает существующего пользователя `admin`.
+- **Первая установка:** production-сервис `init` запускает миграции, а затем `php artisan geoflow:install`. Эта последовательность предназначена для пустой базы. Для экземпляров с данными или историей миграций обязателен протокол остановки и дренирования из раздела 3.1 `../../docs/deployment/DEPLOYMENT.md`.
 - Подробности — в **`../../docs/deployment/DEPLOYMENT.md`**.
 
 ### Вариант 2: локальный PHP
 
-**Требования:** PHP **8.2+** (`pdo_pgsql`, `redis` и др.), **PostgreSQL**, **Redis**, **Composer 2.x**.
+**Требования:** PHP **8.3+** (`pdo_pgsql`, `redis` и др.), **PostgreSQL**, **Redis**, **Composer 2.x**.
 
 ```bash
 git clone https://github.com/yaojingang/GEOFlow.git
@@ -212,8 +212,8 @@ cp .env.example .env
 composer install --no-interaction --prefer-dist
 php artisan key:generate
 
-php artisan migrate --force
-php artisan db:seed --force
+GEOFLOW_SECURITY_FRESH_INSTALL_CONFIRMED=true php artisan migrate --force
+php artisan geoflow:install
 php artisan storage:link
 
 php artisan serve --host=127.0.0.1 --port=8080
@@ -231,14 +231,16 @@ php artisan reverb:start
 
 ---
 
-## Учётные данные по умолчанию (после `db:seed`)
+## Учётные данные по умолчанию (после `geoflow:install`)
 
 | Поле | Значение |
 |------|----------|
 | Логин | `GEOFLOW_ADMIN_USERNAME`, по умолчанию `admin` |
-| Пароль | В локальной разработке по умолчанию `password`; в продакшене задайте `GEOFLOW_ADMIN_PASSWORD`. Если значение пустое и аккаунт ещё не существует, seeder сгенерирует одноразовый случайный пароль в логах init / `db:seed`. |
+| Пароль | В локальной разработке по умолчанию `password`; в продакшене задайте `GEOFLOW_ADMIN_PASSWORD`. Если значение пустое и аккаунт ещё не существует, установщик сгенерирует одноразовый случайный пароль в логах init / `geoflow:install`. |
 
-Seeder создаёт аккаунт только если целевой логин ещё не существует. Повторные запуски никогда не перезаписывают существующий логин, email или пароль.
+`geoflow:install` запускает начальные seeders только на пустой базе. Если он обнаружит пользовательские или бизнес-данные, то только запишет маркер установки и пропустит seed. Admin seeder остаётся идемпотентным и не перезаписывает существующий логин, email или пароль.
+
+Если нужны демо-категории и статьи фронтенда, задайте `GEOFLOW_SEED_FRONTEND_DEMO=true` и затем выполните `php artisan db:seed --force`. Демо-данные по умолчанию только добавляют отсутствующие записи и не перезаписывают существующие настройки сайта, рекламу, категории или статьи. `GEOFLOW_SEED_FRONTEND_DEMO_OVERWRITE=true` используйте только для сброса демо-базы.
 
 ### Блокировка после неудачных входов и ручная разблокировка
 

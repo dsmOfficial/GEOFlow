@@ -2,8 +2,11 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Exceptions\ApiException;
+use App\Services\Api\ApiTokenService;
 use App\Services\Api\IdempotencyService;
 use App\Services\GeoFlow\ArticleGeoFlowService;
+use App\Support\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -55,14 +58,28 @@ class ArticleController extends BaseApiController
     /**
      * 创建文章；成功 HTTP 201。幂等键：POST /articles。
      */
-    public function store(Request $request, ArticleGeoFlowService $articles): JsonResponse
+    public function store(Request $request, ArticleGeoFlowService $articles, ApiTokenService $tokens): JsonResponse
     {
-        $cached = IdempotencyService::maybeReplayJson($request, 'POST /articles');
-        if ($cached !== null) {
-            return $cached;
+        $body = $request->all();
+        $requestsPublication = in_array(trim((string) ($body['status'] ?? 'draft')), ['published', 'private'], true)
+            || in_array(trim((string) ($body['review_status'] ?? 'pending')), ['approved', 'auto_approved'], true)
+            || trim((string) ($body['risk_override_reason'] ?? '')) !== '';
+        if ($requestsPublication && ! $tokens->tokenHasScope($this->auth($request)->token, 'articles:publish')) {
+            throw new ApiException('forbidden', '当前 Token 没有发布或风险放行权限', 403, [
+                'required_scope' => 'articles:publish',
+            ]);
         }
 
-        return $this->success($request, $articles->createArticle($request->all()), 201, 'POST /articles');
+        return IdempotencyService::executeJson($request, 'POST /articles', function () use ($request, $articles): JsonResponse {
+            try {
+                return $this->success($request, $articles->createArticle(
+                    $request->all(),
+                    $this->auth($request)->auditAdminId
+                ), 201);
+            } catch (ApiException $exception) {
+                return $this->riskBlockedResponse($request, $exception);
+            }
+        });
     }
 
     /**
@@ -78,34 +95,39 @@ class ArticleController extends BaseApiController
      */
     public function update(Request $request, int $article, ArticleGeoFlowService $articles): JsonResponse
     {
-        $cached = IdempotencyService::maybeReplayJson($request, 'PATCH /articles/{id}');
-        if ($cached !== null) {
-            return $cached;
-        }
-
-        return $this->success($request, $articles->updateArticle($article, $request->all()), 200, 'PATCH /articles/{id}');
+        return IdempotencyService::executeJson(
+            $request,
+            'PATCH /articles/{id}',
+            fn (): JsonResponse => $this->success($request, $articles->updateArticle(
+                $article,
+                $request->all(),
+                $this->auth($request)->auditAdminId
+            )),
+        );
     }
 
     /**
-     * 提交审核结果。请求体：review_status、review_note。
+     * 提交审核结果。请求体：review_status、review_note，风险放行时显式传 risk_override_reason。
      *
      * audit 管理员 ID 来自 Token 解析的 auditAdminId。幂等键：POST /articles/{id}/review。
      */
     public function review(Request $request, int $article, ArticleGeoFlowService $articles): JsonResponse
     {
-        $cached = IdempotencyService::maybeReplayJson($request, 'POST /articles/{id}/review');
-        if ($cached !== null) {
-            return $cached;
-        }
-
         $body = $request->all();
 
-        return $this->success($request, $articles->reviewArticle(
-            $article,
-            trim((string) ($body['review_status'] ?? '')),
-            trim((string) ($body['review_note'] ?? '')),
-            $this->auth($request)->auditAdminId
-        ), 200, 'POST /articles/{id}/review');
+        return IdempotencyService::executeJson($request, 'POST /articles/{id}/review', function () use ($request, $article, $articles, $body): JsonResponse {
+            try {
+                return $this->success($request, $articles->reviewArticle(
+                    $article,
+                    trim((string) ($body['review_status'] ?? '')),
+                    trim((string) ($body['review_note'] ?? '')),
+                    trim((string) ($body['risk_override_reason'] ?? '')),
+                    $this->auth($request)->auditAdminId
+                ));
+            } catch (ApiException $exception) {
+                return $this->riskBlockedResponse($request, $exception);
+            }
+        });
     }
 
     /**
@@ -113,12 +135,16 @@ class ArticleController extends BaseApiController
      */
     public function publish(Request $request, int $article, ArticleGeoFlowService $articles): JsonResponse
     {
-        $cached = IdempotencyService::maybeReplayJson($request, 'POST /articles/{id}/publish');
-        if ($cached !== null) {
-            return $cached;
-        }
-
-        return $this->success($request, $articles->publishArticle($article), 200, 'POST /articles/{id}/publish');
+        return IdempotencyService::executeJson($request, 'POST /articles/{id}/publish', function () use ($request, $article, $articles): JsonResponse {
+            try {
+                return $this->success($request, $articles->publishArticle(
+                    $article,
+                    $this->auth($request)->auditAdminId
+                ));
+            } catch (ApiException $exception) {
+                return $this->riskBlockedResponse($request, $exception);
+            }
+        });
     }
 
     /**
@@ -126,11 +152,28 @@ class ArticleController extends BaseApiController
      */
     public function trash(Request $request, int $article, ArticleGeoFlowService $articles): JsonResponse
     {
-        $cached = IdempotencyService::maybeReplayJson($request, 'POST /articles/{id}/trash');
-        if ($cached !== null) {
-            return $cached;
+        return IdempotencyService::executeJson(
+            $request,
+            'POST /articles/{id}/trash',
+            fn (): JsonResponse => $this->success($request, $articles->trashArticle($article)),
+        );
+    }
+
+    private function riskBlockedResponse(Request $request, ApiException $exception): JsonResponse
+    {
+        if ($exception->getErrorCode() !== 'article_risk_blocked') {
+            throw $exception;
         }
 
-        return $this->success($request, $articles->trashArticle($article), 200, 'POST /articles/{id}/trash');
+        $requestId = $this->requestId($request);
+        $response = ApiResponse::error(
+            $exception->getErrorCode(),
+            $exception->getMessage(),
+            $requestId,
+            $exception->getHttpStatus(),
+            $exception->getDetails(),
+        )->withHeaders(['X-Request-Id' => $requestId]);
+
+        return $response;
     }
 }

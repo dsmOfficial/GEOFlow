@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Article extends Model
@@ -73,6 +74,16 @@ class Article extends Model
         return $this->hasMany(ArticleReview::class, 'article_id');
     }
 
+    public function riskScans(): HasMany
+    {
+        return $this->hasMany(ArticleRiskScan::class, 'article_id');
+    }
+
+    public function latestRiskScan(): HasOne
+    {
+        return $this->hasOne(ArticleRiskScan::class, 'article_id')->latestOfMany('scanned_at');
+    }
+
     public function taskRuns(): HasMany
     {
         return $this->hasMany(TaskRun::class, 'article_id');
@@ -81,6 +92,20 @@ class Article extends Model
     public function distributions(): HasMany
     {
         return $this->hasMany(ArticleDistribution::class, 'article_id');
+    }
+
+    public function syncedRemoteDistributions(): HasMany
+    {
+        return $this->hasMany(ArticleDistribution::class, 'article_id')
+            ->where('status', 'synced')
+            ->where('action', '!=', 'delete')
+            ->whereNotNull('remote_url')
+            ->whereRaw("TRIM(remote_url) <> ''")
+            ->where(function ($query): void {
+                $query->whereRaw('LOWER(TRIM(remote_url)) LIKE ?', ['http://%'])
+                    ->orWhereRaw('LOWER(TRIM(remote_url)) LIKE ?', ['https://%']);
+            })
+            ->orderByDesc('updated_at');
     }
 
     /**

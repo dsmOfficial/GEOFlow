@@ -4,7 +4,7 @@
 
 > GEOFlow は GEO（Generative Engine Optimization）向けのオープンソース・コンテンツエンジニアリング／マルチサイト配信システムです。ナレッジベース、素材ライブラリ、プロンプト、AI 生成タスク、レビューと公開、データ分析、GEOFlow Agent ターゲットサイトパッケージ、WordPress REST チャネル、汎用 HTTP API チャネル、リモート静的ページ配信を一つの運用フローに統合し、信頼できる資料を追跡可能で公開・配信しやすい GEO コンテンツ資産へ変換します。
 
-[![PHP](https://img.shields.io/badge/PHP-8.2%2B-blue)](https://www.php.net/)
+[![PHP](https://img.shields.io/badge/PHP-8.3%2B-blue)](https://www.php.net/)
 [![PostgreSQL](https://img.shields.io/badge/Database-PostgreSQL-336791)](https://www.postgresql.org/)
 [![Docker](https://img.shields.io/badge/Docker-Compose-blue)](https://docs.docker.com/compose/)
 [![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](../../LICENSE)
@@ -181,7 +181,7 @@ docker compose up -d
 - サイト: `http://localhost:18080`（**`APP_PORT`**、既定 `18080`）  
 - 管理ログイン: `http://localhost:18080/geo_admin/login`（**`ADMIN_BASE_PATH`**、既定 `geo_admin`）  
 
-**`docker-compose.yml`** では **`init`** が DB 準備後に初回マイグレーションと `db:seed` を実行します（既定管理者は下表参照）。
+**`docker-compose.yml`** では **`init`** が DB 準備後にマイグレーションと `php artisan geoflow:install` を実行します。初期データは空の DB の場合だけ書き込まれます（既定管理者は下表参照）。
 
 ### 補足：Docker（本番）
 
@@ -198,12 +198,12 @@ docker compose --env-file .env.prod -f docker-compose.prod.yml up -d app web que
 ```
 
 - フロント／管理は `web`（Nginx）経由、PHP は `app`（php-fpm）。
-- **既定管理者:** 本番の `init` サービスはマイグレーション後に `db:seed` を実行し、既定の管理者アカウントを作成します。再実行しても既存の `admin` ユーザーは上書きされません。
+- **初回インストール:** 本番の `init` サービスはマイグレーション後に `php artisan geoflow:install` を実行します。この手順は空のデータベース専用です。データまたはマイグレーション履歴がある環境では、`../../docs/deployment/DEPLOYMENT.md` 3.1 節の停止・ドレイン手順を実行してください。
 - 手順の詳細は **`../../docs/deployment/DEPLOYMENT.md`** を参照してください。
 
 ### 方法 2：ローカル PHP
 
-**前提:** PHP **8.2+**（`pdo_pgsql`、`redis` 等）、**PostgreSQL**、**Redis**、**Composer 2.x**。
+**前提:** PHP **8.3+**（`pdo_pgsql`、`redis` 等）、**PostgreSQL**、**Redis**、**Composer 2.x**。
 
 ```bash
 git clone https://github.com/yaojingang/GEOFlow.git
@@ -212,8 +212,8 @@ cp .env.example .env
 composer install --no-interaction --prefer-dist
 php artisan key:generate
 
-php artisan migrate --force
-php artisan db:seed --force
+GEOFLOW_SECURITY_FRESH_INSTALL_CONFIRMED=true php artisan migrate --force
+php artisan geoflow:install
 php artisan storage:link
 
 php artisan serve --host=127.0.0.1 --port=8080
@@ -235,20 +235,22 @@ php artisan reverb:start
 
 | 項目 | メモ |
 |------|------|
-| PHP | **8.2+**（Docker は 8.4 の場合あり） |
+| PHP | **8.3+**（Docker は 8.4 の場合あり） |
 | DB | **PostgreSQL**（**pgvector** 推奨） |
 | Redis | キュー用（ローカル検証のみ `QUEUE_CONNECTION=sync` 可） |
 
 ---
 
-## デフォルト管理者（`db:seed` 後）
+## デフォルト管理者（`geoflow:install` 後）
 
 | 項目 | 値 |
 |------|-----|
 | ユーザー名 | `GEOFLOW_ADMIN_USERNAME`、既定は `admin` |
-| パスワード | ローカル開発では既定 `password`。本番では `GEOFLOW_ADMIN_PASSWORD` を設定してください。未設定でアカウントがまだ存在しない場合、seeder は一回限りのランダムパスワードを init / `db:seed` ログに出力します。 |
+| パスワード | ローカル開発では既定 `password`。本番では `GEOFLOW_ADMIN_PASSWORD` を設定してください。未設定でアカウントがまだ存在しない場合、インストーラは一回限りのランダムパスワードを init / `geoflow:install` ログに出力します。 |
 
-Seeder は対象ユーザー名が存在しない場合のみ作成します。再実行しても既存のユーザー名、メール、パスワードは上書きされません。
+`geoflow:install` は空のデータベースでのみ初期 seeders を実行します。ユーザーや業務データを検出した場合はインストール済みマーカーだけを書き込み、seed はスキップします。Admin seeder 自体も冪等で、既存のユーザー名、メール、パスワードは上書きしません。
+
+フロントのデモカテゴリや記事が必要な場合のみ `GEOFLOW_SEED_FRONTEND_DEMO=true` を設定してから `php artisan db:seed --force` を実行してください。デモデータは既定で不足分だけを追加し、既存のサイト設定、広告、カテゴリ、記事は上書きしません。デモ環境をリセットしたい場合だけ `GEOFLOW_SEED_FRONTEND_DEMO_OVERWRITE=true` を追加します。
 
 ### ログイン失敗時のロックと手動解除
 

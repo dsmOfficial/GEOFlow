@@ -14,6 +14,7 @@ use App\Models\TitleLibrary;
 use App\Models\UrlImportJob;
 use App\Models\UrlImportJobLog;
 use App\Services\GeoFlow\KnowledgeChunkSyncService;
+use App\Services\GeoFlow\ManagedImageFileService;
 use App\Support\GeoFlow\ApiKeyCrypto;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -96,6 +97,7 @@ class AdminMaterialsPagesTest extends TestCase
             ->assertSee(__('admin.materials.page_title'))
             ->assertSee(__('admin.materials.knowledge_hub_label'))
             ->assertSee(__('admin.materials.knowledge_hub_vector_progress'))
+            ->assertSee(__('admin.materials.evidence_layer_title'))
             ->assertSeeInOrder([
                 __('admin.materials.knowledge_hub_create'),
                 __('admin.materials.manage_knowledge_bases'),
@@ -103,7 +105,8 @@ class AdminMaterialsPagesTest extends TestCase
             ])
             ->assertSee(__('admin.materials.foundation_title'))
             ->assertSee(__('admin.materials.author_manage_title'))
-            ->assertSee(__('admin.materials.url_import'));
+            ->assertDontSee(__('admin.materials.url_import'))
+            ->assertDontSee(route('admin.url-import'), false);
 
         $this->actingAs($admin, 'admin')
             ->get(route('admin.authors.index'))
@@ -153,13 +156,52 @@ class AdminMaterialsPagesTest extends TestCase
 
         $this->actingAs($admin, 'admin')
             ->get(route('admin.url-import'))
-            ->assertOk()
-            ->assertSee(__('admin.url_import.page_title'));
+            ->assertForbidden();
 
         $this->actingAs($admin, 'admin')
             ->get(route('admin.url-import.history'))
+            ->assertForbidden();
+    }
+
+    public function test_materials_page_counts_high_risk_unreviewed_knowledge_as_pending(): void
+    {
+        $admin = Admin::query()->create([
+            'username' => 'materials_evidence_admin',
+            'password' => 'secret-123',
+            'email' => 'materials-evidence-admin@example.com',
+            'display_name' => 'Materials Evidence Admin',
+            'role' => 'admin',
+            'status' => 'active',
+        ]);
+
+        KnowledgeBase::query()->create([
+            'name' => '待审核高风险知识',
+            'content' => '包含待确认风险表述。',
+            'file_type' => 'markdown',
+            'risk_level' => 'high',
+            'review_status' => 'unreviewed',
+        ]);
+        KnowledgeBase::query()->create([
+            'name' => '待审核高风险知识 2',
+            'content' => '另一条待确认风险表述。',
+            'file_type' => 'markdown',
+            'risk_level' => 'high',
+            'review_status' => 'unreviewed',
+        ]);
+        KnowledgeBase::query()->create([
+            'name' => '已审核高风险知识',
+            'content' => '已经人工确认。',
+            'file_type' => 'markdown',
+            'risk_level' => 'high',
+            'review_status' => 'reviewed',
+        ]);
+
+        $this->actingAs($admin, 'admin')
+            ->get(route('admin.materials.index'))
             ->assertOk()
-            ->assertSee(__('admin.url_import_history.page_title'));
+            ->assertSee(__('admin.materials.evidence_risk_title'))
+            ->assertSee(__('admin.materials.evidence_risk_desc'))
+            ->assertSee('>2<', false);
     }
 
     public function test_admin_can_create_knowledge_base_from_form(): void
@@ -224,7 +266,7 @@ class AdminMaterialsPagesTest extends TestCase
                 'content' => "手动输入的 GEO 背景。\n\n第二段。",
                 'knowledge_files' => [
                     UploadedFile::fake()->createWithContent('alpha.md', "# Alpha\nMarkdown 内容"),
-                    UploadedFile::fake()->createWithContent('beta.txt', "Beta 文本内容"),
+                    UploadedFile::fake()->createWithContent('beta.txt', 'Beta 文本内容'),
                 ],
             ])
             ->assertRedirect(route('admin.knowledge-bases.index'));
@@ -702,7 +744,7 @@ class AdminMaterialsPagesTest extends TestCase
             'password' => 'secret-123',
             'email' => 'url-import-admin@example.com',
             'display_name' => 'Url Import Admin',
-            'role' => 'admin',
+            'role' => 'super_admin',
             'status' => 'active',
         ]);
         $this->createReadyUrlImportAiModel();
@@ -755,7 +797,7 @@ class AdminMaterialsPagesTest extends TestCase
             'password' => 'secret-123',
             'email' => 'url-import-no-model@example.com',
             'display_name' => 'Url Import No Model Admin',
-            'role' => 'admin',
+            'role' => 'super_admin',
             'status' => 'active',
         ]);
 
@@ -833,7 +875,7 @@ class AdminMaterialsPagesTest extends TestCase
             'password' => 'secret-123',
             'email' => 'url-import-runner@example.com',
             'display_name' => 'Url Import Runner',
-            'role' => 'admin',
+            'role' => 'super_admin',
             'status' => 'active',
         ]);
         $this->createReadyUrlImportAiModel();
@@ -982,7 +1024,7 @@ class AdminMaterialsPagesTest extends TestCase
             'password' => 'secret-123',
             'email' => 'url-import-ai-runner@example.com',
             'display_name' => 'Url Import AI Runner',
-            'role' => 'admin',
+            'role' => 'super_admin',
             'status' => 'active',
         ]);
 
@@ -1041,7 +1083,7 @@ class AdminMaterialsPagesTest extends TestCase
             'password' => 'secret-123',
             'email' => 'url-import-wrapped-json@example.com',
             'display_name' => 'Url Import Wrapped Json Admin',
-            'role' => 'admin',
+            'role' => 'super_admin',
             'status' => 'active',
         ]);
         $this->createReadyUrlImportAiModel();
@@ -1099,7 +1141,7 @@ class AdminMaterialsPagesTest extends TestCase
             'password' => 'secret-123',
             'email' => 'url-import-plain-list@example.com',
             'display_name' => 'Url Import Plain List Admin',
-            'role' => 'admin',
+            'role' => 'super_admin',
             'status' => 'active',
         ]);
         $this->createReadyUrlImportAiModel();
@@ -1158,7 +1200,7 @@ class AdminMaterialsPagesTest extends TestCase
             'password' => 'secret-123',
             'email' => 'url-import-failover@example.com',
             'display_name' => 'Url Import Failover Admin',
-            'role' => 'admin',
+            'role' => 'super_admin',
             'status' => 'active',
         ]);
 
@@ -1237,7 +1279,7 @@ class AdminMaterialsPagesTest extends TestCase
             'password' => 'secret-123',
             'email' => 'url-import-retry@example.com',
             'display_name' => 'Url Import Retry Admin',
-            'role' => 'admin',
+            'role' => 'super_admin',
             'status' => 'active',
         ]);
         $this->createReadyUrlImportAiModel();
@@ -1300,6 +1342,8 @@ class AdminMaterialsPagesTest extends TestCase
             'original_name' => 'demo.png',
             'file_name' => 'demo.png',
             'file_path' => 'storage/uploads/images/demo.png',
+            'managed_path_hash' => app(ManagedImageFileService::class)
+                ->pathHash('storage/uploads/images/demo.png'),
             'file_size' => 1024,
             'mime_type' => 'image/png',
             'width' => 100,
@@ -1433,6 +1477,7 @@ class AdminMaterialsPagesTest extends TestCase
             ->where('original_name', 'banner.png')
             ->firstOrFail();
         $this->assertStringStartsWith('storage/uploads/images/', (string) $storedImage->file_path);
+        $this->assertMatchesRegularExpression('/^[a-f0-9]{64}$/', (string) $storedImage->managed_path_hash);
         Storage::disk('public')->assertExists(str_replace('storage/', '', (string) $storedImage->file_path));
 
         $knowledgeFile = UploadedFile::fake()->createWithContent('manual.md', "# 标题\n内容段落");

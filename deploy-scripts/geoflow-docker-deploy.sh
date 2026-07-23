@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# GEOFlow production Docker one-click deployment helper.
+# GEOFlow production Docker first-install helper for a fresh empty database.
 # It performs host preflight checks, prepares .env.prod, deploys the
 # docker-compose.prod.yml stack, seeds the default admin, and runs a healthcheck.
 
@@ -293,7 +293,8 @@ prepare_env() {
   set_env_value .env.prod REVERB_APP_SECRET "$reverb_secret"
   set_env_value .env.prod SESSION_LIFETIME 43200
   set_env_value .env.prod GEOFLOW_SESSION_TIMEOUT 2592000
-  set_env_value .env.prod AUTO_MIGRATE false
+  set_env_value .env.prod AUTO_MIGRATE true
+  set_env_value .env.prod AUTO_INSTALL_ONCE true
   set_env_value .env.prod AUTO_OPTIMIZE true
 
   log "Production environment prepared."
@@ -314,9 +315,6 @@ deploy_stack() {
 
   log "Starting GEOFlow services."
   "${COMPOSE[@]}" up -d app web queue scheduler reverb
-
-  log "Seeding default admin account if it does not exist."
-  "${COMPOSE[@]}" run --rm app php artisan db:seed --force
 
   log "Clearing and rebuilding Laravel caches."
   "${COMPOSE[@]}" run --rm app php artisan optimize:clear
