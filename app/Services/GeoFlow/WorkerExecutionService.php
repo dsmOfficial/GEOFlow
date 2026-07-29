@@ -2,7 +2,6 @@
 
 namespace App\Services\GeoFlow;
 
-use App\Ai\Agents\MarkdownContentWriterAgent;
 use App\Exceptions\ArticleRiskGateException;
 use App\Models\AiModel;
 use App\Models\Article;
@@ -15,7 +14,6 @@ use App\Models\KnowledgeChunk;
 use App\Models\Prompt;
 use App\Models\Task;
 use App\Models\Title;
-use App\Support\GeoFlow\ApiKeyCrypto;
 use App\Support\GeoFlow\ArticleWorkflow;
 use App\Support\GeoFlow\ImageUrlNormalizer;
 use App\Support\GeoFlow\OpenAiRuntimeProvider;
@@ -32,15 +30,16 @@ use Throwable;
 class WorkerExecutionService
 {
     /**
-     * 复用统一 API Key 解密组件，确保 worker 与后台配置端解密行为一致。
+     * 复用正文提示词和模型调用服务，确保任务生成与单篇生成规则一致。
      */
     public function __construct(
-        private readonly ApiKeyCrypto $apiKeyCrypto,
         private readonly KnowledgeChunkSyncService $knowledgeChunkSyncService,
         private readonly KnowledgeRetrievalService $knowledgeRetrievalService,
         private readonly DistributionOrchestrator $distributionOrchestrator,
         private readonly ArticleRiskScanner $articleRiskScanner,
         private readonly ArticleWorkflowTransitionService $articleWorkflowTransitionService,
+        private readonly ArticleContentPromptRenderer $articleContentPromptRenderer,
+        private readonly ArticleContentGenerationService $articleContentGenerationService,
     ) {}
 
     /**
@@ -122,6 +121,7 @@ class WorkerExecutionService
                 'category_id' => $category?->id,
                 'author_id' => $author?->id,
                 'task_id' => (int) $task->id,
+                'source_title_id' => (int) $titleRow->id,
                 'original_keyword' => $keyword,
                 'keywords' => $keyword,
                 'meta_description' => mb_substr($excerpt, 0, 120),
@@ -414,12 +414,6 @@ class WorkerExecutionService
             return 'AI模型不可用或已达每日限制';
         }
 
-        $dailyLimit = (int) ($aiModel->daily_limit ?? 0);
-        $usedToday = (int) ($aiModel->used_today ?? 0);
-        if ($dailyLimit > 0 && $usedToday >= $dailyLimit) {
-            return 'AI模型不可用或已达每日限制';
-        }
-
         return null;
     }
 
@@ -663,7 +657,9 @@ class WorkerExecutionService
 
         $knowledgeBases = KnowledgeBase::query()
             ->whereIn('id', $knowledgeBaseIds)
-            ->get(['id', 'content'])
+            ->select(['id'])
+            ->selectRaw('SUBSTR(content, 1, ?) AS content_excerpt', [2400])
+            ->get()
             ->keyBy('id');
         if ($knowledgeBases->isEmpty()) {
             return '';
@@ -677,16 +673,12 @@ class WorkerExecutionService
                 continue;
             }
 
-            $content = trim((string) ($knowledgeBase->content ?? ''));
+            $content = trim((string) ($knowledgeBase->content_excerpt ?? ''));
             if ($content === '') {
                 continue;
             }
 
             $fallbackContents[$knowledgeBaseId] = $content;
-            $chunkCount = KnowledgeChunk::query()->where('knowledge_base_id', $knowledgeBaseId)->count();
-            if ($chunkCount <= 0) {
-                $this->knowledgeChunkSyncService->sync($knowledgeBaseId, $content);
-            }
         }
 
         if ($fallbackContents === []) {
@@ -934,25 +926,7 @@ class WorkerExecutionService
      */
     private function generateContent(AiModel $aiModel, string $contentPrompt): string
     {
-        $providerUrl = OpenAiRuntimeProvider::resolveChatBaseUrl((string) ($aiModel->api_url ?? ''));
-        if ($providerUrl === '') {
-            throw new RuntimeException('AI 模型 API 地址为空');
-        }
-
-        $apiKey = $this->decryptApiKey((string) ($aiModel->getRawOriginal('api_key') ?? ''));
-        if ($apiKey === '') {
-            throw new RuntimeException('AI 模型密钥为空');
-        }
-
-        $driver = OpenAiRuntimeProvider::resolveChatDriver($providerUrl, (string) ($aiModel->model_id ?? ''));
-        $providerName = OpenAiRuntimeProvider::registerProvider('worker', $driver, $providerUrl, $apiKey);
-        $agent = new MarkdownContentWriterAgent(maxTokens: $this->resolveMaxTokens($aiModel));
-
-        try {
-            $response = $agent->prompt($contentPrompt, [], $providerName, (string) ($aiModel->model_id ?? ''));
-        } catch (Throwable $exception) {
-            throw new RuntimeException('AI 生成失败: '.OpenAiRuntimeProvider::normalizeApiException($exception, $providerUrl), 0, $exception);
-        }
+        $response = $this->articleContentGenerationService->generate($aiModel, $contentPrompt);
 
         $rawContent = (string) ($response->text ?? '');
         $content = OpenAiRuntimeProvider::normalizeGeneratedText($rawContent);
@@ -966,12 +940,6 @@ class WorkerExecutionService
 
         $this->warnIfContentLooksTruncated($content, $aiModel, $response);
 
-        AiModel::query()->whereKey((int) $aiModel->id)->update([
-            'used_today' => DB::raw('COALESCE(used_today,0)+1'),
-            'total_used' => DB::raw('COALESCE(total_used,0)+1'),
-            'updated_at' => now(),
-        ]);
-
         return $content;
     }
 
@@ -980,12 +948,7 @@ class WorkerExecutionService
      */
     private function resolveMaxTokens(AiModel $aiModel): int
     {
-        $configured = (int) ($aiModel->max_tokens ?? 0);
-        if ($configured > 0) {
-            return $configured;
-        }
-
-        return max(256, (int) config('geoflow.content_max_tokens', 8192));
+        return $this->articleContentGenerationService->maxTokens($aiModel);
     }
 
     /**
@@ -1050,14 +1013,6 @@ class WorkerExecutionService
         }
 
         return mb_substr($plain, 0, 180);
-    }
-
-    /**
-     * 兼容 enc:v1 历史格式解密 API Key。
-     */
-    private function decryptApiKey(string $storedApiKey): string
-    {
-        return $this->apiKeyCrypto->decrypt($storedApiKey);
     }
 
     /**

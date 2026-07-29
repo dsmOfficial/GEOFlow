@@ -55,7 +55,7 @@ class WorkerExecutionServicePromptTest extends TestCase
         $this->assertStringContainsString('Please output only the final article body in Markdown.', $prompt);
     }
 
-    public function test_prompt_with_knowledge_context_adds_evidence_citation_rule(): void
+    public function test_worker_prompt_with_knowledge_context_requires_evidence_ids(): void
     {
         $prompt = $this->renderContentPrompt(
             'GEO 诊断怎么做？',
