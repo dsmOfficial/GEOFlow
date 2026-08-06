@@ -55,7 +55,7 @@ class WorkerExecutionServicePromptTest extends TestCase
         $this->assertStringContainsString('Please output only the final article body in Markdown.', $prompt);
     }
 
-    public function test_prompt_with_knowledge_context_adds_evidence_citation_rule(): void
+    public function test_worker_prompt_with_knowledge_context_requires_evidence_ids(): void
     {
         $prompt = $this->renderContentPrompt(
             'GEO 诊断怎么做？',
@@ -66,26 +66,10 @@ class WorkerExecutionServicePromptTest extends TestCase
 
         $this->assertStringContainsString('【证据 K1】', $prompt);
         $this->assertStringContainsString('知识库引用要求', $prompt);
-        $this->assertStringContainsString('不要输出 [K1]、[K2]', $prompt);
+        $this->assertStringContainsString('优先依据参考知识中的 [K1] 等证据编号', $prompt);
+        $this->assertStringContainsString('并在相关句子后标注证据编号', $prompt);
+        $this->assertStringNotContainsString('禁止输出任何引用占位符', $prompt);
         $this->assertStringContainsString('证据不足时不要编造来源或结论', $prompt);
-    }
-
-    public function test_it_strips_knowledge_evidence_markers_from_generated_content(): void
-    {
-        $service = app(WorkerExecutionService::class);
-        $method = new ReflectionMethod($service, 'stripKnowledgeEvidenceMarkers');
-        $method->setAccessible(true);
-
-        $raw = "生鲜电商强调产地直采[K1]，并承诺30分钟达[K2]。\n\n【证据 K3】这行不应保留。\nEvidence K4 should go.\n( K5 )尾注也去掉。";
-        $cleaned = (string) $method->invoke($service, $raw);
-
-        $this->assertStringNotContainsString('[K1]', $cleaned);
-        $this->assertStringNotContainsString('[K2]', $cleaned);
-        $this->assertStringNotContainsString('【证据 K3】', $cleaned);
-        $this->assertStringNotContainsString('Evidence K4', $cleaned);
-        $this->assertStringNotContainsString('K5', $cleaned);
-        $this->assertStringContainsString('产地直采', $cleaned);
-        $this->assertStringContainsString('30分钟达', $cleaned);
     }
 
     public function test_unknown_template_blocks_are_preserved_for_future_extensions(): void

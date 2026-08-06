@@ -36,6 +36,11 @@
     }
     $subMap = [
         'admin.analytics' => 'analytics',
+        'admin.analytics.content' => 'analytics',
+        'admin.analytics.traffic' => 'analytics',
+        'admin.analytics.ai-visibility' => 'analytics',
+        'admin.analytics.leads' => 'analytics',
+        'admin.analytics.distribution' => 'analytics',
         'admin.system-updates.index' => 'dashboard',
         'admin.system-updates.check' => 'dashboard',
         'admin.system-updates.plan' => 'dashboard',
@@ -98,6 +103,7 @@
         'admin.jiey-flow-import.history' => 'materials',
         'admin.jiey-flow-import.show' => 'materials',
         'admin.ai-models.index' => 'ai_config',
+        'admin.ai-source-providers.index' => 'ai_config',
         'admin.ai-prompts' => 'ai_config',
         'admin.site-settings.sensitive-words' => 'site_settings',
         'admin.site-settings.sensitive-words.store' => 'site_settings',

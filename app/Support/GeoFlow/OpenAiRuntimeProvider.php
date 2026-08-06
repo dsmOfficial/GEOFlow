@@ -190,7 +190,7 @@ final class OpenAiRuntimeProvider
      * 向 config('ai.providers') 注入单条运行时配置并返回 provider 名称。
      *
      * @param  string  $registrySlot  调用场景标识，避免同名覆盖（如 worker、title_ai、embedding）
-     * @param  string  $driver         Laravel AI 驱动名（如 openai）
+     * @param  string  $driver  Laravel AI 驱动名（如 openai）
      */
     public static function registerProvider(string $registrySlot, string $driver, string $providerUrl, string $apiKey): string
     {
@@ -251,6 +251,7 @@ final class OpenAiRuntimeProvider
 
             if (($data['type'] ?? null) === 'response.output_text.delta' && isset($data['delta'])) {
                 $segments[] = self::stringifyContentPart($data['delta']);
+
                 continue;
             }
 
@@ -338,6 +339,7 @@ final class OpenAiRuntimeProvider
         foreach ($content as $part) {
             if (is_string($part) || is_numeric($part)) {
                 $text .= (string) $part;
+
                 continue;
             }
 

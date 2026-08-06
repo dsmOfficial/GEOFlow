@@ -7,6 +7,7 @@ use App\Contracts\Outbound\OutboundTransport;
 use App\Models\Admin;
 use App\Services\Admin\AdminUpdateMetadataService;
 use App\Services\Admin\AdminWelcomeModalService;
+use App\Services\GeoFlow\AnonymousUsageTelemetry;
 use App\Services\GeoFlow\ArticleGeoFlowService;
 use App\Services\GeoFlow\HorizonMetricsAdapter;
 use App\Services\GeoFlow\JobQueueService;
@@ -23,6 +24,7 @@ use GuzzleHttp\Utils;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
@@ -67,6 +69,9 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        RateLimiter::for('admin-login', function (Request $request): Limit {
+            return Limit::perMinute(30)->by('admin-login-ip:'.$request->ip());
+        });
         RateLimiter::for('admin-sensitive', function (Request $request): array {
             $adminId = (int) ($request->user('admin')?->getAuthIdentifier() ?? 0);
 
@@ -75,6 +80,13 @@ class AppServiceProvider extends ServiceProvider
                 Limit::perMinute(5)->by('admin-sensitive:admin-ip:'.$adminId.'|'.$request->ip()),
             ];
         });
+
+        $adminGuard = Auth::guard('admin');
+        if (method_exists($adminGuard, 'setRememberDuration')) {
+            $adminGuard->setRememberDuration(
+                max(1, (int) config('geoflow.admin_remember_minutes', 43200))
+            );
+        }
         View::composer(['site.layout', 'theme.*.layout'], SiteLayoutComposer::class);
 
         View::composer('admin.layouts.app', function ($view): void {
@@ -86,6 +98,10 @@ class AppServiceProvider extends ServiceProvider
             $view->with(
                 'adminUpdateNotificationPayload',
                 $admin instanceof Admin ? app(AdminUpdateMetadataService::class)->buildNotificationPayload() : null
+            );
+            $view->with(
+                'anonymousUsageTelemetryPayload',
+                $admin instanceof Admin ? app(AnonymousUsageTelemetry::class)->payload($admin) : null
             );
         });
     }

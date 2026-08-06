@@ -19,6 +19,7 @@ class SensitiveAdminRouteAuthorizationTest extends TestCase
             ->map(static fn ($route): ?string => $route->getName())
             ->filter(static fn (?string $name): bool => is_string($name) && (
                 str_starts_with($name, 'admin.distribution.')
+                || $name === 'admin.analytics.distribution'
                 || str_starts_with($name, 'admin.url-import')
                 || str_starts_with($name, 'admin.jiey-flow-import')
                 || str_starts_with($name, 'admin.site-settings.theme-replications.')
@@ -39,6 +40,7 @@ class SensitiveAdminRouteAuthorizationTest extends TestCase
 
         foreach ([
             route('admin.distribution.index'),
+            route('admin.analytics.distribution'),
             route('admin.url-import'),
             route('admin.jiey-flow-import'),
             route('admin.site-settings.theme-replications.create'),
@@ -48,11 +50,24 @@ class SensitiveAdminRouteAuthorizationTest extends TestCase
     }
 
     #[Test]
+    public function an_admin_403_response_includes_a_traceable_request_id(): void
+    {
+        $admin = $this->admin('admin');
+
+        $this->actingAs($admin, 'admin')
+            ->withHeader('X-Request-Id', 'admin-403-trace')
+            ->get(route('admin.distribution.index'))
+            ->assertForbidden()
+            ->assertHeader('X-Request-Id', 'admin-403-trace');
+    }
+
+    #[Test]
     public function a_super_admin_can_open_distribution_and_url_import_pages(): void
     {
         $admin = $this->admin('super_admin');
 
         $this->actingAs($admin, 'admin')->get(route('admin.distribution.index'))->assertOk();
+        $this->actingAs($admin, 'admin')->get(route('admin.analytics.distribution'))->assertOk();
         $this->actingAs($admin, 'admin')->get(route('admin.url-import'))->assertOk();
         $this->actingAs($admin, 'admin')->get(route('admin.jiey-flow-import'))->assertOk();
     }
