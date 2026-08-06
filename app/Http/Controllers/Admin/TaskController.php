@@ -548,7 +548,7 @@ class TaskController extends Controller
             'ai_model_id' => ['required', 'integer', 'min:1'],
             'author_id' => ['nullable', 'integer', 'min:0'],
             'image_library_id' => ['nullable', 'integer', 'min:1'],
-            'image_count' => ['nullable', 'integer', 'min:0', 'max:5'],
+            'image_count' => ['nullable', 'integer', 'min:0', 'max:'.max(0, (int) config('geoflow.max_article_images', 10))],
             'knowledge_base_id' => ['nullable', 'integer', 'min:1', 'exists:knowledge_bases,id'],
             'knowledge_base_ids' => ['nullable', 'array', 'max:5'],
             'knowledge_base_ids.*' => ['integer', 'min:1', 'distinct', 'exists:knowledge_bases,id'],

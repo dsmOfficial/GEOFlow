@@ -85,6 +85,31 @@ class OpenAiRuntimeProviderTest extends TestCase
             'https://ark.cn-beijing.volces.com/api/v3',
             OpenAiRuntimeProvider::resolveEmbeddingBaseUrl('https://ark.cn-beijing.volces.com/api/v3')
         );
+
+        $this->assertSame(
+            'https://ark.cn-beijing.volces.com/api/v3',
+            OpenAiRuntimeProvider::resolveEmbeddingBaseUrl('https://ark.cn-beijing.volces.com/api/v3/embeddings/multimodal')
+        );
+    }
+
+    public function test_it_detects_multimodal_embedding_models(): void
+    {
+        $this->assertTrue(OpenAiRuntimeProvider::isMultimodalEmbeddingModel('doubao-embedding-vision-251215'));
+        $this->assertTrue(OpenAiRuntimeProvider::isMultimodalEmbeddingModel(
+            'ep-20251215-xxxx',
+            'https://ark.cn-beijing.volces.com/api/v3/embeddings/multimodal'
+        ));
+        $this->assertFalse(OpenAiRuntimeProvider::isMultimodalEmbeddingModel('doubao-embedding-text-240515'));
+        $this->assertFalse(OpenAiRuntimeProvider::isMultimodalEmbeddingModel('text-embedding-3-small'));
+
+        $this->assertSame(
+            '/embeddings/multimodal',
+            OpenAiRuntimeProvider::resolveEmbeddingEndpointPath('doubao-embedding-vision-251215')
+        );
+        $this->assertSame(
+            '/embeddings',
+            OpenAiRuntimeProvider::resolveEmbeddingEndpointPath('doubao-embedding-text-240515')
+        );
     }
 
     public function test_it_normalizes_gemini_base_urls_to_native_v1beta(): void

@@ -597,6 +597,20 @@
                                         ];
                                     }
                                 }
+                                $officialSyncStatus = strtolower(trim((string) ($article->official_sync_status ?? '')));
+                                $officialSyncKey = in_array($officialSyncStatus, ['queued', 'sending', 'synced', 'failed'], true)
+                                    ? $officialSyncStatus
+                                    : 'empty';
+                                $officialSyncClass = match ($officialSyncKey) {
+                                    'synced' => 'bg-emerald-100 text-emerald-800 border border-emerald-200',
+                                    'failed' => 'bg-red-100 text-red-800 border border-red-200',
+                                    'queued', 'sending' => 'bg-sky-100 text-sky-800 border border-sky-200',
+                                    default => 'bg-gray-100 text-gray-700 border border-gray-200',
+                                };
+                                $officialUrl = trim((string) ($article->official_url ?? ''));
+                                $officialUrlValid = $officialUrl !== ''
+                                    && filter_var($officialUrl, FILTER_VALIDATE_URL) !== false
+                                    && in_array(strtolower((string) parse_url($officialUrl, PHP_URL_SCHEME)), ['http', 'https'], true);
                             @endphp
                             <tr class="hover:bg-gray-50">
                                 <td class="batch-checkbox hidden px-6 py-4">
@@ -672,6 +686,16 @@
                                         <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium {{ $reviewClass }}">
                                             {{ __('admin.articles.review_prefix') }}: {{ __('admin.articles.review.'.(string) $article->review_status) }}
                                         </span>
+                                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium {{ $officialSyncClass }}" @if($officialSyncKey === 'failed' && trim((string) ($article->official_last_error ?? '')) !== '') title="{{ $article->official_last_error }}" @endif>
+                                            <i data-lucide="globe" class="mr-1 h-3 w-3 shrink-0"></i>
+                                            {{ __('admin.articles.official_sync.prefix') }}: {{ __('admin.articles.official_sync.status.'.$officialSyncKey) }}
+                                        </span>
+                                        @if($officialUrlValid)
+                                            <a href="{{ $officialUrl }}" target="_blank" rel="noopener noreferrer" class="inline-flex max-w-[200px] items-center gap-1 truncate text-[11px] font-medium text-violet-700 hover:text-violet-900" title="{{ __('admin.articles.official_sync.open_url') }}">
+                                                <i data-lucide="external-link" class="h-3 w-3 shrink-0"></i>
+                                                <span class="truncate">{{ parse_url($officialUrl, PHP_URL_HOST) ?: $officialUrl }}</span>
+                                            </a>
+                                        @endif
                                     </div>
                                 </td>
                                 @endif

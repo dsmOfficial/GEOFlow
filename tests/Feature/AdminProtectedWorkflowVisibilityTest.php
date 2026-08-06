@@ -75,7 +75,10 @@ class AdminProtectedWorkflowVisibilityTest extends TestCase
             ->assertOk()
             ->assertDontSee(route('admin.url-import'), false)
             ->assertDontSee(route('admin.url-import.store'), false)
-            ->assertDontSee(route('admin.url-import.history'), false);
+            ->assertDontSee(route('admin.url-import.history'), false)
+            ->assertDontSee(route('admin.jiey-flow-import'), false)
+            ->assertDontSee(route('admin.jiey-flow-import.store'), false)
+            ->assertDontSee(route('admin.jiey-flow-import.history'), false);
 
         $this->assertProtectedTablesAreNotQueried(
             ['site_theme_replications'],

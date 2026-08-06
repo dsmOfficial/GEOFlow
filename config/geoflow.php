@@ -103,12 +103,28 @@ return [
     // 避免依赖各服务商较小的默认上限（常见 4K）导致长文被截断。
     'content_max_tokens' => max(256, (int) env('GEOFLOW_CONTENT_MAX_TOKENS', 8192)),
 
+    // Jiey Internal Flow：Smart Import source_type=jiey_flow 拉取项目 artifacts 的配置。
+    // secret 仅来自环境变量；未启用或缺 secret 时 jiey_flow 请求应失败并给出明确提示。
+    'jiey' => [
+        'enabled' => filter_var(env('GEOFLOW_JIEY_ENABLED', false), FILTER_VALIDATE_BOOLEAN),
+        'api_base' => rtrim((string) env('GEOFLOW_JIEY_API_BASE', 'https://api.gongxingglobal.com'), '/'),
+        'internal_secret' => (string) env('GEOFLOW_JIEY_INTERNAL_SECRET', ''),
+        'timeout_seconds' => max(1, (int) env('GEOFLOW_JIEY_TIMEOUT_SECONDS', 30)),
+        'max_bytes' => max(1, (int) env('GEOFLOW_JIEY_MAX_BYTES', 8 * 1024 * 1024)),
+        // 官网同步：成功后是否在正文末尾追加/更新原文链接
+        'official_source_link_enabled' => filter_var(env('GEOFLOW_OFFICIAL_SOURCE_LINK_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
+        'official_source_link_template' => (string) env('GEOFLOW_OFFICIAL_SOURCE_LINK_TEMPLATE', '**原文链接：** [{url}]({url})'),
+        'official_default_category_slug' => trim((string) env('GEOFLOW_OFFICIAL_DEFAULT_CATEGORY_SLUG', 'tech-blog')) ?: 'tech-blog',
+    ],
+
     // 本地上传根目录（绝对路径）
     'upload_path' => env('GEOFLOW_UPLOAD_PATH', public_path('assets/images')),
     // 上传资源对外访问 URL 前缀
     'upload_url' => env('GEOFLOW_UPLOAD_URL', '/assets/images/'),
-    // 单文件上传最大字节数
-    'max_upload_bytes' => (int) env('GEOFLOW_MAX_UPLOAD_BYTES', 2 * 1024 * 1024),
+    // 单文件上传最大字节数（图片库等素材上传）
+    'max_upload_bytes' => (int) env('GEOFLOW_MAX_UPLOAD_BYTES', 10 * 1024 * 1024),
+    // 任务/导入每篇文章最多插入图片数
+    'max_article_images' => max(0, min(20, (int) env('GEOFLOW_MAX_ARTICLE_IMAGES', 10))),
     // 兼容旧客户端直接提交已存在图片路径；默认关闭，建议使用 multipart 上传。
     'legacy_image_path_input' => filter_var(env('GEOFLOW_LEGACY_IMAGE_PATH_INPUT', false), FILTER_VALIDATE_BOOLEAN),
     // 升级门禁：确认旧 worker 已全部退出且图片路径哈希回填完成后，才允许物理文件删除。

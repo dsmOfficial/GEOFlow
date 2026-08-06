@@ -1,3 +1,212 @@
+# Smart Import API Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Add a public async API endpoint (`POST /api/v1/smart-import`) that accepts Markdown or URL input, automatically creates materials + prompt + task, and enqueues article generation in the background.
+
+**Architecture:** New SmartImportJob model tracks async progress. ProcessSmartImportJob (Laravel queue job) runs the full pipeline: parse input → create materials → ensure prompt → create task → enqueue generation. SmartImportService holds the core orchestration logic. Controller is minimal — just create job and show status.
+
+**Tech Stack:** Laravel 12, PostgreSQL, Redis queue, existing GeoFlow services (UrlImportProcessingService, TaskLifecycleService, MaterialLibraryService, KnowledgeChunkSyncService)
+
+## Global Constraints
+
+- PHP 8.2+
+- No authentication required — routes are public (outside `api.auth` middleware group)
+- Queue: dispatch to `geoflow` queue using `Queueable` trait pattern from `ProcessGeoFlowTaskJob`
+- Follow existing patterns: controllers extend `BaseApiController`, services use constructor injection
+- Markdown content max 500KB
+- URL mode must block private/internal IPs (reuse `guardAgainstPrivateTargets()`)
+- Migration timestamp: `2026_06_18_000000`
+
+---
+
+## File Structure
+
+| Action | File | Responsibility |
+|--------|------|----------------|
+| Create | `database/migrations/2026_06_18_000000_create_smart_import_jobs.php` | DB schema for async job tracking |
+| Create | `app/Models/SmartImportJob.php` | Eloquent model |
+| Create | `app/Services/GeoFlow/SmartImportService.php` | Core orchestration: parse → materials → prompt → task → enqueue |
+| Create | `app/Jobs/ProcessSmartImportJob.php` | Laravel queue job wrapping SmartImportService |
+| Create | `app/Http/Controllers/Api/V1/SmartImportController.php` | REST controller: store + show |
+| Modify | `routes/api.php` | Add 2 public routes |
+
+---
+
+### Task 1: Database Migration
+
+**Files:**
+- Create: `database/migrations/2026_06_18_000000_create_smart_import_jobs.php`
+
+**Interfaces:**
+- Produces: `smart_import_jobs` table with columns: `id`, `source_type`, `article_type`, `input_data` (json), `status`, `current_step`, `progress_percent`, `result_json`, `error_message`, `created_at`, `updated_at`
+
+- [ ] **Step 1: Create migration file**
+
+```bash
+php artisan make:migration create_smart_import_jobs
+```
+
+Rename to `2026_06_18_000000_create_smart_import_jobs.php` and replace content:
+
+```php
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::create('smart_import_jobs', function (Blueprint $table): void {
+            $table->id();
+            $table->string('source_type', 20)->comment('url / markdown');
+            $table->string('article_type', 20)->comment('jiey_ide / project');
+            $table->json('input_data')->nullable()->comment('原始请求参数');
+            $table->string('status', 20)->default('queued')->comment('queued / processing / completed / failed');
+            $table->string('current_step', 30)->nullable();
+            $table->unsignedTinyInteger('progress_percent')->default(0);
+            $table->json('result_json')->nullable()->comment('完成后写入素材/任务 ID');
+            $table->text('error_message')->nullable();
+            $table->timestamps();
+
+            $table->index('status');
+            $table->index('created_at');
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('smart_import_jobs');
+    }
+};
+```
+
+- [ ] **Step 2: Run migration**
+
+```bash
+php artisan migrate
+```
+
+Expected: Migration successful, `smart_import_jobs` table created.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add database/migrations/2026_06_18_000000_create_smart_import_jobs.php
+git commit -m "feat: add smart_import_jobs table migration"
+```
+
+---
+
+### Task 2: SmartImportJob Model
+
+**Files:**
+- Create: `app/Models/SmartImportJob.php`
+
+**Interfaces:**
+- Produces: `SmartImportJob` model with `$fillable`, `$casts`, and query scopes
+
+- [ ] **Step 1: Create the model**
+
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+
+class SmartImportJob extends Model
+{
+    protected $table = 'smart_import_jobs';
+
+    protected $fillable = [
+        'source_type',
+        'article_type',
+        'input_data',
+        'status',
+        'current_step',
+        'progress_percent',
+        'result_json',
+        'error_message',
+    ];
+
+    protected function casts(): array
+    {
+        return [
+            'input_data' => 'array',
+            'result_json' => 'array',
+            'progress_percent' => 'integer',
+        ];
+    }
+
+    public function isFinished(): bool
+    {
+        return in_array($this->status, ['completed', 'failed'], true);
+    }
+
+    public function markProcessing(string $step, int $progress): void
+    {
+        $this->update([
+            'status' => 'processing',
+            'current_step' => $step,
+            'progress_percent' => $progress,
+        ]);
+    }
+
+    public function markCompleted(array $result): void
+    {
+        $this->update([
+            'status' => 'completed',
+            'current_step' => 'completed',
+            'progress_percent' => 100,
+            'result_json' => $result,
+        ]);
+    }
+
+    public function markFailed(string $errorMessage): void
+    {
+        $this->update([
+            'status' => 'failed',
+            'current_step' => 'failed',
+            'progress_percent' => 100,
+            'error_message' => $errorMessage,
+        ]);
+    }
+}
+```
+
+- [ ] **Step 2: Verify model loads**
+
+```bash
+php artisan tinker --execute="echo get_class(new App\Models\SmartImportJob());"
+```
+
+Expected: `App\Models\SmartImportJob`
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add app/Models/SmartImportJob.php
+git commit -m "feat: add SmartImportJob model"
+```
+
+---
+
+### Task 3: SmartImportService (Core Orchestration)
+
+**Files:**
+- Create: `app/Services/GeoFlow/SmartImportService.php`
+
+**Interfaces:**
+- Consumes: `SmartImportJob`, `UrlImportProcessingService` (process + commit), `MaterialLibraryService`, `TaskLifecycleService` (createTask + enqueueTask), `KnowledgeChunkSyncService`, `Prompt`, `AiModel`, `ApiKeyCrypto`
+- Produces: `SmartImportService::handle(SmartImportJob): void`
+
+- [ ] **Step 1: Create the service class**
+
+```php
 <?php
 
 namespace App\Services\GeoFlow;
@@ -24,22 +233,12 @@ final class SmartImportService
     private const JIEY_IDE_PROMPT_NAME = 'jiey IDE 推广';
     private const PROJECT_PROMPT_NAME = 'jiey IDE 项目推广';
 
-    /** 普通 Markdown/业务向导入的关键词上限 */
-    private const KEYWORD_LIMIT_BUSINESS = 20;
-
-    /** Jiey 技术/项目制作向导入的关键词上限（模块、技术栈、链路更多） */
-    private const KEYWORD_LIMIT_TECHNICAL_PROJECT = 30;
-
-    private const TITLE_LIMIT = 50;
-
     public function __construct(
         private readonly UrlImportProcessingService $urlImportService,
         private readonly MaterialLibraryService $materialLibraryService,
         private readonly TaskLifecycleService $taskLifecycleService,
         private readonly KnowledgeChunkSyncService $chunkSyncService,
         private readonly ApiKeyCrypto $apiKeyCrypto,
-        private readonly JieyInternalFlowClient $jieyClient,
-        private readonly JieyFlowArtifactNormalizer $jieyNormalizer,
     ) {}
 
     public function handle(SmartImportJob $job): void
@@ -56,10 +255,6 @@ final class SmartImportService
 
             if ($sourceType === 'url') {
                 $materials = $this->importFromUrl($job, $input);
-            } elseif ($sourceType === 'jiey_flow') {
-                $materials = $this->importFromJieyFlow($job, $input);
-                // jiey 路径可能回填 project_name / project_description
-                $input = array_merge($input, $job->fresh()?->input_data ?? []);
             } else {
                 $materials = $this->importFromMarkdown($job, $input);
             }
@@ -67,25 +262,19 @@ final class SmartImportService
             // Step 2: Ensure prompt exists
             $job->markProcessing('ensuring_prompt', 75);
             $prompt = $this->ensurePrompt($articleType, $input);
-            $knowledgeBaseIds = $this->resolveTaskKnowledgeBaseIds(
-                (int) $materials['knowledge_base_id'],
-                $input
-            );
 
             // Step 3: Create task
             $job->markProcessing('creating_task', 85);
             $aiModelId = $modelId ?? $this->resolveDefaultModelId();
-            $taskName = $this->buildTaskName($articleType, $sourceType, $input, $prompt);
-
-            $imageOptions = $this->resolveTaskImageOptions($input);
+            $taskName = $this->buildTaskName($articleType, $sourceType, $input);
 
             $taskData = [
                 'name' => $taskName,
                 'title_library_id' => $materials['title_library_id'],
                 'prompt_id' => (int) $prompt->id,
                 'ai_model_id' => $aiModelId,
-                'knowledge_base_id' => $knowledgeBaseIds[0] ?? (int) $materials['knowledge_base_id'],
-                'knowledge_base_ids' => $knowledgeBaseIds,
+                'knowledge_base_id' => $materials['knowledge_base_id'],
+                'knowledge_base_ids' => [$materials['knowledge_base_id']],
                 'need_review' => 1,
                 'auto_keywords' => 1,
                 'auto_description' => 1,
@@ -97,8 +286,8 @@ final class SmartImportService
                 'publish_scope' => 'local_only',
                 'publish_interval' => 3600,
                 'category_mode' => 'smart',
-                'image_count' => $imageOptions['image_count'],
-                'image_library_id' => $imageOptions['image_library_id'],
+                'image_count' => 0,
+                'image_library_id' => null,
                 'author_id' => null,
                 'fixed_category_id' => null,
             ];
@@ -204,132 +393,10 @@ final class SmartImportService
             $name = Str::limit(Str::before($content, "\n"), 80, '') ?: 'Markdown 导入';
         }
 
-        return $this->commitMarkdownMaterials(
-            $job,
-            $content,
-            $name,
-            'Markdown 智能导入自动生成',
-            'markdown_import',
-            []
-        );
-    }
-
-    /**
-     * Jiey Flow mode: HMAC 拉取 artifacts → 规范为 Markdown → 复用 markdown 入库链路。
-     *
-     * @param  array<string, mixed>  $input
-     * @return array{
-     *   knowledge_base_id:int,
-     *   keyword_library_id:int,
-     *   title_library_id:int,
-     *   keywords_count:int,
-     *   titles_count:int,
-     *   jiey:array<string,mixed>
-     * }
-     */
-    private function importFromJieyFlow(SmartImportJob $job, array $input): array
-    {
-        $projectId = max(0, (int) ($input['project_id'] ?? 0));
-        if ($projectId <= 0) {
-            throw new \InvalidArgumentException('jiey_flow 模式必须提供有效的 project_id');
-        }
-
-        $job->markProcessing('fetching_jiey_artifacts', 20);
-        $artifacts = $this->jieyClient->getProjectArtifacts($projectId);
-        if ($artifacts === []) {
-            throw new \RuntimeException('Jiey project #'.$projectId.' 没有可导入的 artifacts');
-        }
-
-        $job->markProcessing('normalizing_artifacts', 35);
-
-        $slugFilter = $input['artifact_type_slugs'] ?? null;
-        if (is_string($slugFilter) && trim($slugFilter) !== '') {
-            $slugFilter = array_values(array_filter(array_map('trim', explode(',', $slugFilter))));
-        }
-        if (! is_array($slugFilter)) {
-            $slugFilter = null;
-        }
-
-        $normalized = $this->jieyNormalizer->toMarkdown($artifacts, [
-            'project_id' => $projectId,
-            'project_name' => (string) ($input['project_name'] ?? ''),
-            'project_description' => (string) ($input['project_description'] ?? ''),
-            'artifact_type_slugs' => $slugFilter,
-            'include_unpublished' => (bool) ($input['include_unpublished'] ?? false),
-        ]);
-
-        $content = trim((string) ($normalized['markdown'] ?? ''));
-        if ($content === '') {
-            throw new \RuntimeException('Jiey project #'.$projectId.' 的 artifacts 未解析出可用正文');
-        }
-
-        // 回填 project 元数据，便于后续 ensurePrompt / 任务命名
-        if (trim((string) ($input['project_name'] ?? '')) === '' && trim((string) ($normalized['name'] ?? '')) !== '') {
-            $input['project_name'] = (string) $normalized['name'];
-            $job->input_data = array_merge($job->input_data ?? [], ['project_name' => $input['project_name']]);
-            $job->save();
-        }
-        if (trim((string) ($input['project_description'] ?? '')) === '' && trim((string) ($normalized['description'] ?? '')) !== '') {
-            $input['project_description'] = (string) $normalized['description'];
-            $job->input_data = array_merge($job->input_data ?? [], ['project_description' => $input['project_description']]);
-            $job->save();
-        }
-
-        $name = trim((string) ($normalized['name'] ?? ''));
-        if ($name === '') {
-            $name = 'Jiey 项目 #'.$projectId;
-        }
-
-        $materials = $this->commitMarkdownMaterials(
-            $job,
-            $content,
-            $name,
-            trim((string) ($normalized['description'] ?? '')) !== ''
-                ? (string) $normalized['description']
-                : 'Jiey Flow 智能导入自动生成',
-            'jiey_flow_import',
-            [
-                'source_name' => 'Jiey Flow #'.$projectId,
-                'source_url' => (string) ($normalized['preview_url'] ?? ''),
-                'source_type' => 'other',
-                'business_line' => (string) ($normalized['brand'] ?? ''),
-                'review_status' => 'unreviewed',
-            ]
-        );
-
-        $materials['jiey'] = [
-            'project_id' => $projectId,
-            'artifact_count' => (int) ($normalized['artifact_count'] ?? count($artifacts)),
-            'included_artifact_ids' => $normalized['included_artifact_ids'] ?? [],
-            'skipped' => $normalized['skipped'] ?? [],
-            'preview_url' => (string) ($normalized['preview_url'] ?? ''),
-            'brand' => (string) ($normalized['brand'] ?? ''),
-        ];
-
-        return $materials;
-    }
-
-    /**
-     * 将 Markdown 正文落地为知识库 + 关键词库 + 标题库（markdown / jiey_flow 共用）。
-     *
-     * @param  array<string, mixed>  $knowledgeMeta
-     * @return array{knowledge_base_id:int, keyword_library_id:int, title_library_id:int, keywords_count:int, titles_count:int}
-     */
-    private function commitMarkdownMaterials(
-        SmartImportJob $job,
-        string $content,
-        string $name,
-        string $description,
-        string $titleGenerationType,
-        array $knowledgeMeta = []
-    ): array {
-        if (mb_strlen($content, 'UTF-8') > 500_000) {
-            throw new \InvalidArgumentException('Markdown 内容不能超过 500KB');
-        }
-
-        $kbPayload = array_merge([
+        // Create KnowledgeBase
+        $knowledgeBase = KnowledgeBase::query()->create([
             'name' => $name.' 知识库',
-            'description' => $description,
+            'description' => 'Markdown 智能导入自动生成',
             'content' => $content,
             'character_count' => mb_strlen($content, 'UTF-8'),
             'used_task_count' => 0,
@@ -337,22 +404,20 @@ final class SmartImportService
             'file_path' => '',
             'word_count' => mb_strlen(strip_tags($content), 'UTF-8'),
             'usage_count' => 0,
-        ], array_filter(
-            $knowledgeMeta,
-            static fn ($value): bool => $value !== null && $value !== ''
-        ));
+        ]);
 
-        $knowledgeBase = KnowledgeBase::query()->create($kbPayload);
+        // Sync chunks
         $this->chunkSyncService->sync((int) $knowledgeBase->id, $content);
 
         $job->markProcessing('analyzing_markdown', 40);
-        // jiey_flow 导入默认走技术/项目制作导向，便于输出工程向关键词与标题。
-        $analysisFocus = $titleGenerationType === 'jiey_flow_import' ? 'technical_project' : 'business';
-        $analysis = $this->analyzeMarkdownWithAi($content, $name, $analysisFocus);
 
+        // Use AI to extract keywords and titles
+        $analysis = $this->analyzeMarkdownWithAi($content, $name);
+
+        // Create KeywordLibrary
         $keywordLibrary = KeywordLibrary::query()->create([
             'name' => $name.' 关键词库',
-            'description' => $description,
+            'description' => 'Markdown 智能导入自动生成',
             'keyword_count' => 0,
         ]);
         foreach ($analysis['keywords'] as $keyword) {
@@ -363,11 +428,12 @@ final class SmartImportService
         }
         $keywordLibrary->update(['keyword_count' => Keyword::query()->where('library_id', (int) $keywordLibrary->id)->count()]);
 
+        // Create TitleLibrary
         $titleLibrary = TitleLibrary::query()->create([
             'name' => $name.' 标题库',
-            'description' => $description,
+            'description' => 'Markdown 智能导入自动生成',
             'title_count' => 0,
-            'generation_type' => $titleGenerationType,
+            'generation_type' => 'markdown_import',
             'generation_rounds' => 1,
             'is_ai_generated' => 1,
         ]);
@@ -398,21 +464,19 @@ final class SmartImportService
     /**
      * Use AI to extract keywords and titles from Markdown content.
      *
-     * @param  string  $focus  business|technical_project
      * @return array{keywords: list<string>, titles: list<string>}
      */
-    private function analyzeMarkdownWithAi(string $content, string $name, string $focus = 'business'): array
+    private function analyzeMarkdownWithAi(string $content, string $name): array
     {
-        $focus = $focus === 'technical_project' ? 'technical_project' : 'business';
         $model = $this->resolveAnalysisModel();
         $runtime = $this->prepareAiRuntime($model);
 
         $truncatedContent = Str::limit($content, 12000, '');
-        $agent = new MarkdownContentWriterAgent($this->buildMarkdownAnalysisSystemPrompt($focus));
+        $agent = new MarkdownContentWriterAgent($this->buildMarkdownAnalysisSystemPrompt());
 
         // Extract keywords
         $keywordResponse = $agent->prompt(
-            $this->buildMarkdownKeywordsUserPrompt($truncatedContent, $name, $focus),
+            $this->buildMarkdownKeywordsUserPrompt($truncatedContent, $name),
             [],
             $runtime['provider'],
             $runtime['model_id']
@@ -427,7 +491,7 @@ final class SmartImportService
 
         // Extract titles
         $titleResponse = $agent->prompt(
-            $this->buildMarkdownTitlesUserPrompt($truncatedContent, $name, $keywords, $focus),
+            $this->buildMarkdownTitlesUserPrompt($truncatedContent, $name, $keywords),
             [],
             $runtime['provider'],
             $runtime['model_id']
@@ -447,93 +511,32 @@ final class SmartImportService
             'updated_at' => now(),
         ]);
 
-        $keywordLimit = $this->keywordLimitForFocus($focus);
-
         return [
-            'keywords' => array_slice($keywords, 0, $keywordLimit),
-            'titles' => array_slice($titles, 0, self::TITLE_LIMIT),
+            'keywords' => array_slice($keywords, 0, 10),
+            'titles' => array_slice($titles, 0, 50),
         ];
     }
 
-    private function keywordLimitForFocus(string $focus): int
+    private function buildMarkdownAnalysisSystemPrompt(): string
     {
-        return $focus === 'technical_project'
-            ? self::KEYWORD_LIMIT_TECHNICAL_PROJECT
-            : self::KEYWORD_LIMIT_BUSINESS;
-    }
-
-    private function buildMarkdownAnalysisSystemPrompt(string $focus = 'business'): string
-    {
-        if ($focus === 'technical_project') {
-            $keywordLimit = self::KEYWORD_LIMIT_TECHNICAL_PROJECT;
-
-            return <<<PROMPT
-你是 GEOFlow 的技术项目素材构建器。你只输出 JSON，不要输出 Markdown 代码块。
-你需要从给定的项目资料（PRD、产品定义、页面契约、技术说明等）中，提取描述「整个项目」的技术/制作向关键词，以及以「项目整体」为主角的 GEO 文章标题。
-输出字段：keywords（最多 {$keywordLimit} 个短关键词或短语），titles（最多 50 个多样化的文章标题）。
-关键词要求：
-- 中文 2-8 个字，英文 1-4 个单词；
-- 优先能概括整项目的词：项目定位、行业场景、整体架构、全栈交付、核心业务闭环、技术栈组合、多端形态、工程交付方式；
-- 可以包含支撑整项目理解的关键能力词（如即时零售、库存履约、四端协同），但不要堆砌过细的页面名、按钮名、单表字段名；
-- 例如：全栈项目、生鲜即时零售、小程序电商、四端架构、Spring Boot、Vue3、履约闭环、从0到1交付；
-- 避免纯营销口号；尽量使用文档中真实出现的项目级概念。
-标题要求（非常重要）：
-- 标题必须把「整个项目」当作主角，而不是某个小模块、单个页面、单个接口或单个功能点；
-- 优先角度：项目是什么、从 0 到 1 怎么做、整体架构、业务闭环、技术选型、多端如何协同、如何交付一个完整系统、项目复盘/实践总结；
-- 禁止写成「某模块怎么做」「某页面实现」「某接口设计」「库存锁定细节」「分拣任务池」这类局部专题标题；
-- 若需提及局部能力，也只能作为整项目叙事的一部分，标题仍要落在项目整体；
-- 面向独立开发者、外包团队、技术负责人；
-- 可自然关联“用 AI/代码生成工具加速完整项目制作”，但不要写成硬广；
-- 不能虚构文档中没有的技术栈、业务或能力。
-PROMPT;
-        }
-
-        $keywordLimit = self::KEYWORD_LIMIT_BUSINESS;
-
-        return <<<PROMPT
+        return <<<'PROMPT'
 你是 GEOFlow 的素材构建器。你只输出 JSON，不要输出 Markdown 代码块。
 你需要从给定的 Markdown 文档中提取核心业务关键词和可用于 GEO 内容生成的标题。
-输出字段：keywords（最多 {$keywordLimit} 个短关键词或短语），titles（最多 50 个多样化的文章标题）。
+输出字段：keywords（最多 10 个短关键词或短语），titles（最多 50 个多样化的文章标题）。
 关键词要求：中文 2-5 个字，英文 1-3 个单词；必须是产品/服务词、行业词、需求场景词、问题词、解决方案词。
 标题要求：围绕"是什么、为什么、怎么做、对比、选型、指南、清单、案例拆解、常见问题、趋势判断"等角度展开。
 不能虚构文档中没有的信息。
 PROMPT;
     }
 
-    private function buildMarkdownKeywordsUserPrompt(string $content, string $name, string $focus = 'business'): string
+    private function buildMarkdownKeywordsUserPrompt(string $content, string $name): string
     {
-        if ($focus === 'technical_project') {
-            $min = 15;
-            $max = self::KEYWORD_LIMIT_TECHNICAL_PROJECT;
-
-            return "请从以下项目资料中提取 {$min}-{$max} 个能描述「整个项目」的技术/项目制作关键词。"
-                ."优先：项目定位、行业场景、整体架构、技术栈组合、多端形态、核心业务闭环、交付方式。"
-                ."不要只抽某个小模块/页面/接口的细碎词；关键词应服务于写整项目文章。\n\n"
-                ."文档名称：{$name}\n\n文档内容：\n{$content}\n\n"
-                ."请只输出 JSON：{\"keywords\": [\"关键词1\", \"关键词2\", ...]}";
-        }
-
-        $min = 10;
-        $max = self::KEYWORD_LIMIT_BUSINESS;
-
-        return "请从以下 Markdown 文档中提取 {$min}-{$max} 个核心业务关键词。\n\n文档名称：{$name}\n\n文档内容：\n{$content}\n\n请只输出 JSON：{\"keywords\": [\"关键词1\", \"关键词2\", ...]}";
+        return "请从以下 Markdown 文档中提取 5-10 个核心业务关键词。\n\n文档名称：{$name}\n\n文档内容：\n{$content}\n\n请只输出 JSON：{\"keywords\": [\"关键词1\", \"关键词2\", ...]}";
     }
 
-    private function buildMarkdownTitlesUserPrompt(string $content, string $name, array $keywords, string $focus = 'business'): string
+    private function buildMarkdownTitlesUserPrompt(string $content, string $name, array $keywords): string
     {
         $keywordList = implode('、', $keywords);
-        if ($focus === 'technical_project') {
-            return "请基于以下项目资料和关键词，生成 50 个以「项目整体」为主角的技术/项目制作向 GEO 文章标题。\n"
-                ."要求：\n"
-                ."1. 每条标题都要能写一篇完整项目文章，而不是某个小模块专题；\n"
-                ."2. 优先角度：项目全景、从 0 到 1、整体架构、业务闭环、技术选型、多端协同、完整交付、实践复盘；\n"
-                ."3. 禁止标题只聚焦单一小模块/页面/接口/字段（如仅写库存锁定、分拣池、某个详情页）；\n"
-                ."4. 标题中尽量出现项目名或项目定位，让人一眼知道是在讲整个系统；\n"
-                ."5. 读者是开发者与技术决策者，不要写成纯营销软文。\n\n"
-                ."文档名称：{$name}\n关键词：{$keywordList}\n\n文档内容：\n{$content}\n\n"
-                ."请只输出 JSON：{\"titles\": [\"标题1\", \"标题2\", ...]}";
-        }
-
         return "请基于以下 Markdown 文档和关键词，生成 50 个多样化的 GEO 文章标题。\n\n文档名称：{$name}\n关键词：{$keywordList}\n\n文档内容：\n{$content}\n\n请只输出 JSON：{\"titles\": [\"标题1\", \"标题2\", ...]}";
     }
 
@@ -619,24 +622,7 @@ PROMPT;
      */
     private function ensurePrompt(string $articleType, array $input): Prompt
     {
-        $selectedPromptId = max(0, (int) ($input['prompt_id'] ?? 0));
-        if ($selectedPromptId > 0) {
-            $selected = Prompt::query()
-                ->whereKey($selectedPromptId)
-                ->where('type', 'content')
-                ->first();
-            if ($selected) {
-                return $selected;
-            }
-
-            throw new \InvalidArgumentException('指定的提示词不存在或不是正文提示词');
-        }
-
         $promptName = $articleType === 'project' ? self::PROJECT_PROMPT_NAME : self::JIEY_IDE_PROMPT_NAME;
-
-        $content = $articleType === 'project'
-            ? $this->buildProjectPromptContent($input)
-            : $this->buildJieyIdePromptContent();
 
         $prompt = Prompt::query()
             ->where('name', $promptName)
@@ -644,16 +630,12 @@ PROMPT;
             ->first();
 
         if ($prompt) {
-            // project 类型每次按当前项目刷新提示词，避免复用旧项目模板导致正文偏题到局部模块。
-            if ($articleType === 'project' && trim((string) $prompt->content) !== trim($content)) {
-                $prompt->update([
-                    'content' => $content,
-                    'variables' => '',
-                ]);
-            }
-
-            return $prompt->refresh();
+            return $prompt;
         }
+
+        $content = $articleType === 'project'
+            ? $this->buildProjectPromptContent($input)
+            : $this->buildJieyIdePromptContent();
 
         return Prompt::query()->create([
             'name' => $promptName,
@@ -661,80 +643,6 @@ PROMPT;
             'content' => $content,
             'variables' => '',
         ]);
-    }
-
-    /**
-     * @param  array<string, mixed>  $input
-     * @return array{image_library_id:?int, image_count:int}
-     */
-    private function resolveTaskImageOptions(array $input): array
-    {
-        $imageLibraryId = max(0, (int) ($input['image_library_id'] ?? 0));
-        $maxArticleImages = max(0, (int) config('geoflow.max_article_images', 10));
-        $imageCount = max(0, min($maxArticleImages, (int) ($input['image_count'] ?? 0)));
-
-        if ($imageLibraryId <= 0) {
-            return [
-                'image_library_id' => null,
-                'image_count' => 0,
-            ];
-        }
-
-        $exists = \App\Models\ImageLibrary::query()->whereKey($imageLibraryId)->exists();
-        if (! $exists) {
-            throw new \InvalidArgumentException('指定的图片库不存在');
-        }
-
-        return [
-            'image_library_id' => $imageLibraryId,
-            'image_count' => $imageCount > 0 ? $imageCount : 1,
-        ];
-    }
-
-    /**
-     * 主知识库 + 可选附加知识库；主库始终排第一，总数不超过 5。
-     *
-     * @param  array<string, mixed>  $input
-     * @return list<int>
-     */
-    private function resolveTaskKnowledgeBaseIds(int $primaryKnowledgeBaseId, array $input): array
-    {
-        $ids = [$primaryKnowledgeBaseId];
-        $extra = $input['extra_knowledge_base_ids'] ?? $input['knowledge_base_ids'] ?? [];
-        if (! is_array($extra)) {
-            $extra = [];
-        }
-
-        foreach ($extra as $rawId) {
-            $id = (int) $rawId;
-            if ($id <= 0 || in_array($id, $ids, true)) {
-                continue;
-            }
-            $ids[] = $id;
-            if (count($ids) >= 5) {
-                break;
-            }
-        }
-
-        $existing = KnowledgeBase::query()
-            ->whereIn('id', $ids)
-            ->pluck('id')
-            ->map(static fn ($id): int => (int) $id)
-            ->all();
-        $existingSet = array_fill_keys($existing, true);
-
-        $validated = [];
-        foreach ($ids as $id) {
-            if (isset($existingSet[$id])) {
-                $validated[] = $id;
-            }
-        }
-
-        if ($validated === []) {
-            throw new \RuntimeException('任务未绑定到有效知识库');
-        }
-
-        return $validated;
     }
 
     private function buildJieyIdePromptContent(): string
@@ -781,36 +689,19 @@ PROMPT;
 项目名称：{$projectName}
 项目简介：{$projectDescription}
 
-写作目标（非常重要）：
-- 文章主题必须是「整个项目」的全景介绍与实践，而不是某个小模块、单个页面、单个接口或局部功能点专题
-- 读者看完应理解：这是什么项目、解决什么问题、整体怎么构成、核心业务如何闭环、技术上如何落地、如何交付
-
-文章结构建议：
-1. 项目定位与要解决的问题
-2. 目标用户与核心业务场景
-3. 整体架构与多端形态（可概括，不要陷入单页细节）
-4. 核心业务闭环（从主链路讲清楚，局部能力只作支撑）
-5. 技术选型与工程交付方式
-6. 项目价值、适用场景与实践总结
-
-硬性约束：
-- 不要把全文写成某一个小模块教程（如只写库存锁定、分拣池、售后审核页）
-- 可以引用局部能力证明整项目完整性，但每个局部都要回到项目整体叙事
-- 自然提及该项目由 jiey IDE 生成；jiey IDE 是 AI 全栈代码生成器，可用自然语言生成 Spring Boot + Vue3 + UniApp + 网站等代码
-- 风格专业可信，突出项目本身，而不是工具硬广
-- 请基于参考知识中的项目资料写作，不要编造资料中不存在的能力
+文章要求：
+- 展示该项目的技术栈、核心功能和业务价值
+- 自然提及该项目由 jiey IDE 生成
+- jiey IDE 是一款 AI 全栈代码生成器，用自然语言即可生成 Spring Boot + Vue3 + UniApp + 网站四层代码
+- 风格专业可信，突出项目本身的价值而非工具广告
 
 目标受众：对项目所在领域感兴趣的技术人员、创业者、潜在用户。
 PROMPT;
     }
 
-    private function buildTaskName(string $articleType, string $sourceType, array $input, ?Prompt $prompt = null): string
+    private function buildTaskName(string $articleType, string $sourceType, array $input): string
     {
         $prefix = $articleType === 'project' ? 'jiey IDE 项目推广' : 'jiey IDE 推广';
-        $roleLabel = $this->resolveTaskRoleLabel($input, $prompt);
-        if ($roleLabel !== null) {
-            $prefix .= ' · '.$roleLabel;
-        }
 
         if ($sourceType === 'url') {
             $url = trim((string) ($input['url'] ?? ''));
@@ -819,18 +710,6 @@ PROMPT;
                 PHP_URL_HOST
             ) ?? $url) : 'URL';
             return "{$prefix} - {$host}";
-        }
-
-        if ($sourceType === 'jiey_flow') {
-            $projectName = trim((string) ($input['project_name'] ?? ''));
-            if ($projectName !== '') {
-                return "{$prefix} - {$projectName}";
-            }
-            $projectId = max(0, (int) ($input['project_id'] ?? 0));
-
-            return $projectId > 0
-                ? "{$prefix} - Jiey #{$projectId}"
-                : "{$prefix} - Jiey Flow";
         }
 
         $name = trim((string) ($input['markdown_name'] ?? ''));
@@ -844,41 +723,6 @@ PROMPT;
         }
 
         return $prefix.' - Markdown 导入';
-    }
-
-    /**
-     * @param  array<string, mixed>  $input
-     */
-    private function resolveTaskRoleLabel(array $input, ?Prompt $prompt = null): ?string
-    {
-        $promptName = trim((string) ($prompt?->name ?? ''));
-        if ($promptName === '' && max(0, (int) ($input['prompt_id'] ?? 0)) > 0) {
-            $promptName = trim((string) (Prompt::query()
-                ->whereKey((int) $input['prompt_id'])
-                ->value('name') ?? ''));
-        }
-
-        if ($promptName === '') {
-            return null;
-        }
-
-        $roleLabel = app(JieyProjectRolePromptCatalog::class)->labelForPromptName($promptName);
-        if ($roleLabel !== null) {
-            return $roleLabel;
-        }
-
-        // 非内置角色但显式选了提示词时，用精简后的提示词名区分
-        $compact = preg_replace('/^Jiey项目·/u', '', $promptName) ?? $promptName;
-        $compact = preg_replace('/视角$/u', '', $compact) ?? $compact;
-        $compact = trim((string) $compact);
-
-        if ($compact === '' || $compact === $promptName) {
-            $compact = mb_strlen($promptName, 'UTF-8') > 16
-                ? mb_substr($promptName, 0, 16, 'UTF-8')
-                : $promptName;
-        }
-
-        return $compact !== '' ? $compact : null;
     }
 
     private function resolveDefaultModelId(): int
@@ -951,3 +795,372 @@ PROMPT;
         ];
     }
 }
+```
+
+- [ ] **Step 2: Verify the service instantiates**
+
+```bash
+php artisan tinker --execute="echo get_class(app(App\Services\GeoFlow\SmartImportService::class));"
+```
+
+Expected: `App\Services\GeoFlow\SmartImportService`
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add app/Services/GeoFlow/SmartImportService.php
+git commit -m "feat: add SmartImportService for async import orchestration"
+```
+
+---
+
+### Task 4: ProcessSmartImportJob Queue Job
+
+**Files:**
+- Create: `app/Jobs/ProcessSmartImportJob.php`
+
+**Interfaces:**
+- Consumes: `SmartImportJob`, `SmartImportService`
+- Produces: dispatched to `geoflow` queue
+
+- [ ] **Step 1: Create the Job class**
+
+```php
+<?php
+
+namespace App\Jobs;
+
+use App\Models\SmartImportJob;
+use App\Services\GeoFlow\SmartImportService;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Queue\Queueable;
+
+class ProcessSmartImportJob implements ShouldQueue
+{
+    use Queueable;
+
+    public int $tries = 1;
+
+    public int $timeout = 600;
+
+    public function __construct(
+        public readonly int $smartImportJobId
+    ) {}
+
+    /**
+     * @return array<int, string>
+     */
+    public function tags(): array
+    {
+        return [
+            'geoflow',
+            'smart_import',
+            'smart_import_job:'.$this->smartImportJobId,
+        ];
+    }
+
+    public function handle(SmartImportService $service): void
+    {
+        $job = SmartImportJob::query()->find($this->smartImportJobId);
+
+        if (! $job) {
+            return;
+        }
+
+        if ($job->isFinished()) {
+            return;
+        }
+
+        $service->handle($job);
+    }
+}
+```
+
+- [ ] **Step 2: Verify the Job class loads**
+
+```bash
+php artisan tinker --execute="echo get_class(new App\Jobs\ProcessSmartImportJob(1));"
+```
+
+Expected: `App\Jobs\ProcessSmartImportJob`
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add app/Jobs/ProcessSmartImportJob.php
+git commit -m "feat: add ProcessSmartImportJob queue job"
+```
+
+---
+
+### Task 5: SmartImportController + Routes
+
+**Files:**
+- Create: `app/Http/Controllers/Api/V1/SmartImportController.php`
+- Modify: `routes/api.php`
+
+**Interfaces:**
+- Consumes: `SmartImportJob`, `ProcessSmartImportJob`, `SmartImportService` (for handle via Job)
+- Produces: `POST /api/v1/smart-import` (202), `GET /api/v1/smart-import/{job}` (200)
+
+- [ ] **Step 1: Create the controller**
+
+```php
+<?php
+
+namespace App\Http\Controllers\Api\V1;
+
+use App\Exceptions\ApiException;
+use App\Jobs\ProcessSmartImportJob;
+use App\Models\SmartImportJob;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+
+class SmartImportController extends BaseApiController
+{
+    /**
+     * 发起智能导入（公开接口，无需认证）。
+     */
+    public function store(Request $request): JsonResponse
+    {
+        $this->validateStoreRequest($request);
+
+        $sourceType = trim((string) $request->input('source_type'));
+        $articleType = trim((string) $request->input('article_type'));
+        $articleCount = max(1, min(50, (int) $request->input('article_count', 10)));
+
+        $inputData = $request->only([
+            'source_type', 'article_type', 'url', 'markdown_content',
+            'markdown_name', 'article_count', 'project_name',
+            'project_description', 'model_id',
+        ]);
+        $inputData['article_count'] = $articleCount;
+
+        $job = SmartImportJob::query()->create([
+            'source_type' => $sourceType,
+            'article_type' => $articleType,
+            'input_data' => $inputData,
+            'status' => 'queued',
+            'current_step' => 'queued',
+            'progress_percent' => 0,
+        ]);
+
+        ProcessSmartImportJob::dispatch((int) $job->id)->onQueue('geoflow');
+
+        return $this->success($request, [
+            'job_id' => (int) $job->id,
+            'status' => 'queued',
+            'source_type' => $sourceType,
+            'article_type' => $articleType,
+            'article_count' => $articleCount,
+            'created_at' => $job->created_at?->toIso8601String(),
+        ], 202);
+    }
+
+    /**
+     * 查询智能导入进度（公开接口，无需认证）。
+     */
+    public function show(Request $request, int $job): JsonResponse
+    {
+        $smartImportJob = SmartImportJob::query()->find($job);
+
+        if (! $smartImportJob) {
+            throw new ApiException('job_not_found', 'Smart import job 不存在', 404);
+        }
+
+        $data = [
+            'job_id' => (int) $smartImportJob->id,
+            'status' => (string) $smartImportJob->status,
+            'source_type' => (string) $smartImportJob->source_type,
+            'article_type' => (string) $smartImportJob->article_type,
+            'current_step' => $smartImportJob->current_step,
+            'progress_percent' => (int) $smartImportJob->progress_percent,
+            'result' => $smartImportJob->result_json,
+            'error_message' => $smartImportJob->error_message,
+            'created_at' => $smartImportJob->created_at?->toIso8601String(),
+            'updated_at' => $smartImportJob->updated_at?->toIso8601String(),
+        ];
+
+        return $this->success($request, $data);
+    }
+
+    private function validateStoreRequest(Request $request): void
+    {
+        $sourceType = trim((string) $request->input('source_type'));
+        $articleType = trim((string) $request->input('article_type'));
+
+        $fieldErrors = [];
+
+        if (! in_array($sourceType, ['url', 'markdown'], true)) {
+            $fieldErrors['source_type'] = 'source_type 必须是 url 或 markdown';
+        }
+
+        if (! in_array($articleType, ['jiey_ide', 'project'], true)) {
+            $fieldErrors['article_type'] = 'article_type 必须是 jiey_ide 或 project';
+        }
+
+        if ($sourceType === 'url') {
+            $url = trim((string) $request->input('url'));
+            if ($url === '') {
+                $fieldErrors['url'] = 'URL 模式时 url 不能为空';
+            }
+        }
+
+        if ($sourceType === 'markdown') {
+            $content = trim((string) $request->input('markdown_content'));
+            if ($content === '') {
+                $fieldErrors['markdown_content'] = 'Markdown 模式时 markdown_content 不能为空';
+            }
+        }
+
+        if ($articleType === 'project') {
+            $projectName = trim((string) $request->input('project_name'));
+            if ($projectName === '') {
+                $fieldErrors['project_name'] = 'project 模式建议提供 project_name';
+            }
+        }
+
+        if (! empty($fieldErrors)) {
+            throw new ApiException('validation_failed', '参数校验失败', 422, [
+                'field_errors' => $fieldErrors,
+            ]);
+        }
+    }
+}
+```
+
+- [ ] **Step 2: Add routes to `routes/api.php`**
+
+Add after line 22 (`->middleware(['api.request_id'])`) and before the `Route::middleware(['api.auth'])` group. The new routes go inside the `prefix('v1')` group but outside `api.auth`:
+
+Open `routes/api.php` and add these lines after the `Route::post('auth/login', ...)` line (line 25) and before the `Route::middleware(['api.auth'])` block (line 28):
+
+```php
+        // 公开：智能导入（无需认证）
+        Route::post('smart-import', [SmartImportController::class, 'store']);
+        Route::get('smart-import/{job}', [SmartImportController::class, 'show'])->whereNumber('job');
+```
+
+Also add the import at the top:
+
+```php
+use App\Http\Controllers\Api\V1\SmartImportController;
+```
+
+- [ ] **Step 3: Verify routes are registered**
+
+```bash
+php artisan route:list | grep smart-import
+```
+
+Expected: Two routes showing `POST api/v1/smart-import` and `GET api/v1/smart-import/{job}`.
+
+- [ ] **Step 4: Test validation (POST with missing params)**
+
+Start the dev server if not running, then:
+
+```bash
+curl -s -X POST http://localhost:18080/api/v1/smart-import \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json' \
+  -d '{}' | python3 -m json.tool
+```
+
+Expected: 422 with `field_errors` listing `source_type`, `article_type`.
+
+- [ ] **Step 5: Test successful POST (Markdown mode)**
+
+```bash
+curl -s -X POST http://localhost:18080/api/v1/smart-import \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json' \
+  -d '{
+    "source_type": "markdown",
+    "article_type": "jiey_ide",
+    "markdown_content": "# Test\n\nThis is a test document about AI code generation tools.",
+    "markdown_name": "AI 代码生成器介绍",
+    "article_count": 10
+  }' | python3 -m json.tool
+```
+
+Expected: 202 with `job_id`, `status: "queued"`.
+
+- [ ] **Step 6: Test GET progress**
+
+```bash
+curl -s http://localhost:18080/api/v1/smart-import/1 \
+  -H 'Accept: application/json' | python3 -m json.tool
+```
+
+Expected: 200 with job status (likely `processing` or `completed`/`failed` depending on queue worker).
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add app/Http/Controllers/Api/V1/SmartImportController.php routes/api.php
+git commit -m "feat: add SmartImportController and public API routes"
+```
+
+---
+
+### Task 6: End-to-End Verification
+
+**Files:**
+- None (verification only)
+
+- [ ] **Step 1: Test URL mode**
+
+```bash
+curl -s -X POST http://localhost:18080/api/v1/smart-import \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json' \
+  -d '{
+    "source_type": "url",
+    "article_type": "jiey_ide",
+    "url": "https://www.jiewaigongxing.com/",
+    "article_count": 5
+  }' | python3 -m json.tool
+```
+
+Expected: 202, `job_id` returned. Check status after ~30s — should show `completed` with materials + task IDs.
+
+- [ ] **Step 2: Test project mode with Markdown**
+
+```bash
+curl -s -X POST http://localhost:18080/api/v1/smart-import \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json' \
+  -d '{
+    "source_type": "markdown",
+    "article_type": "project",
+    "markdown_content": "# 电商平台\n\n一个完整的 B2C 电商平台，包含商品管理、订单系统、支付集成、用户中心等模块。\n\n技术栈：Spring Boot + Vue3 + UniApp",
+    "markdown_name": "电商平台项目",
+    "project_name": "电商平台",
+    "project_description": "一个由 jiey IDE 生成的完整 B2C 电商平台，包含商品管理、订单系统、支付集成等",
+    "article_count": 5
+  }' | python3 -m json.tool
+```
+
+Expected: 202, then after processing: `completed` with prompt name "jiey IDE 项目推广" and task created.
+
+- [ ] **Step 3: Verify materials in database**
+
+```bash
+php artisan tinker --execute="echo App\Models\SmartImportJob::latest()->first()->result_json;"
+```
+
+Expected: JSON with materials, prompt, task IDs.
+
+- [ ] **Step 4: Run existing test suite**
+
+```bash
+php artisan test
+```
+
+Expected: All existing tests pass (no regressions).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git commit -m "verify: smart-import API end-to-end tests pass"
+```

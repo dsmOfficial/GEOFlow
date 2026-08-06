@@ -1012,7 +1012,7 @@ class KnowledgeChunkSyncService
         try {
             $results = [];
             $pendingChunks = $chunks;
-            $batchSize = $this->embeddingBatchSize();
+            $batchSize = $this->embeddingBatchSize($embeddingMetadata);
             while ($pendingChunks !== []) {
                 $batch = array_slice($pendingChunks, 0, $batchSize, true);
 
@@ -1117,9 +1117,14 @@ class KnowledgeChunkSyncService
     /**
      * 生成一批文本对应的真实 embedding 向量。
      *
-     * OpenAI 兼容服务商（OpenAI / 火山方舟 Doubao / MiniMax / 智谱 等）统一走直连 /embeddings 请求，
+     * OpenAI 兼容服务商（OpenAI / 火山方舟 Doubao text / MiniMax / 智谱 等）统一走直连 /embeddings 请求，
      * 仅发送 model + input；不再附带 Laravel AI 默认注入的 dimensions 参数，避免部分服务商
      * （如 doubao-embedding-text）将其判定为 InvalidParameter 而导致整批向量化失败。
+     *
+     * 火山方舟 multimodal/vision 向量模型（如 doubao-embedding-vision）走 /embeddings/multimodal，
+     * input 为 `[{type:"text",text:"..."}]`；一次请求的多个 input 项会融合为一个向量，
+     * 因此文本切片批量必须逐条请求。
+     *
      * Gemini 原生接口形态不同，继续复用 SDK。
      *
      * @param  list<string>  $inputs
@@ -1134,6 +1139,10 @@ class KnowledgeChunkSyncService
                 ->generate($providerName, (string) $embeddingMetadata['model_name']);
 
             return array_values((array) $response->embeddings);
+        }
+
+        if ($this->isMultimodalEmbeddingMetadata($embeddingMetadata)) {
+            return $this->requestMultimodalEmbeddings($inputs, $embeddingMetadata);
         }
 
         return $this->requestOpenAiCompatibleEmbeddings($inputs, $embeddingMetadata);
@@ -1175,10 +1184,80 @@ class KnowledgeChunkSyncService
             ));
         }
 
-        $data = $response->json();
+        return $this->extractOpenAiCompatibleEmbeddingRows($response->json());
+    }
+
+    /**
+     * 直连火山方舟 multimodal embedding 接口。
+     *
+     * 官方协议：POST /api/v3/embeddings/multimodal
+     * body: { model, input: [{type:"text", text:"..."}, ...] }
+     * 同一次请求中的多个 input 项会融合为一个向量，因此这里对每条文本单独请求，
+     * 保证切片向量与文本一一对应。
+     *
+     * @param  list<string>  $inputs
+     * @param  array{model_id:int,model_name:string,provider:string,api_url:string,api_key:string,driver:string}  $embeddingMetadata
+     * @return array<int,mixed>
+     */
+    private function requestMultimodalEmbeddings(array $inputs, array $embeddingMetadata): array
+    {
+        $endpoint = rtrim((string) $embeddingMetadata['api_url'], '/').'/embeddings/multimodal';
+        $embeddings = [];
+
+        foreach (array_values($inputs) as $index => $text) {
+            $request = $this->http->acceptJson()
+                ->asJson()
+                ->withToken((string) $embeddingMetadata['api_key'])
+                ->connectTimeout(8)
+                ->timeout(45);
+
+            $response = $this->safeHttp->post($request, $endpoint, [
+                'model' => (string) $embeddingMetadata['model_name'],
+                'input' => [
+                    [
+                        'type' => 'text',
+                        'text' => (string) $text,
+                    ],
+                ],
+            ], (int) config('geoflow.outbound_ai_max_bytes', 8 * 1024 * 1024));
+
+            if (! $response->successful()) {
+                $error = data_get($response->json(), 'error.message');
+                $message = is_string($error) && trim($error) !== ''
+                    ? 'Embedding provider request failed.'
+                    : 'Embedding provider request failed.';
+
+                throw new \RuntimeException(sprintf(
+                    'HTTP request returned status code %d: %s',
+                    $response->status(),
+                    $message,
+                ));
+            }
+
+            $vector = $this->extractMultimodalEmbeddingVector($response->json());
+            if ($vector === null) {
+                throw new \RuntimeException('invalid_embedding_vector');
+            }
+
+            $embeddings[$index] = $vector;
+        }
+
+        return $embeddings;
+    }
+
+    /**
+     * @return array<int,mixed>
+     */
+    private function extractOpenAiCompatibleEmbeddingRows(mixed $data): array
+    {
         $rows = is_array($data) ? ($data['data'] ?? []) : [];
         if (! is_array($rows)) {
             return [];
+        }
+
+        // multimodal 响应偶发被误路由到兼容解析：data 为单对象 {embedding:[...]}
+        if ($rows !== [] && array_is_list($rows) === false && isset($rows['embedding'])) {
+            return [0 => $rows['embedding']];
         }
 
         $embeddings = [];
@@ -1199,8 +1278,54 @@ class KnowledgeChunkSyncService
         return $embeddings;
     }
 
-    private function embeddingBatchSize(): int
+    /**
+     * 解析 multimodal embedding 响应中的向量。
+     *
+     * 兼容：
+     * - { data: { embedding: [...] } }  （火山方舟 multimodal 常见）
+     * - { data: [ { embedding: [...] } ] }（部分兼容网关）
+     * - { embedding: [...] }
+     *
+     * @return list<float>|null
+     */
+    private function extractMultimodalEmbeddingVector(mixed $data): ?array
     {
+        if (! is_array($data)) {
+            return null;
+        }
+
+        $candidate = null;
+        if (isset($data['data']) && is_array($data['data'])) {
+            if (isset($data['data']['embedding']) && is_array($data['data']['embedding'])) {
+                $candidate = $data['data']['embedding'];
+            } elseif (isset($data['data'][0]['embedding']) && is_array($data['data'][0]['embedding'])) {
+                $candidate = $data['data'][0]['embedding'];
+            }
+        } elseif (isset($data['embedding']) && is_array($data['embedding'])) {
+            $candidate = $data['embedding'];
+        }
+
+        return $this->normalizeEmbeddingVector($candidate);
+    }
+
+    /**
+     * @param  array{model_id:int,model_name:string,provider:string,api_url:string,api_key:string,driver:string}  $embeddingMetadata
+     */
+    private function isMultimodalEmbeddingMetadata(array $embeddingMetadata): bool
+    {
+        return OpenAiRuntimeProvider::isMultimodalEmbeddingModel(
+            (string) ($embeddingMetadata['model_name'] ?? ''),
+            (string) ($embeddingMetadata['api_url'] ?? '')
+        );
+    }
+
+    private function embeddingBatchSize(?array $embeddingMetadata = null): int
+    {
+        // multimodal 协议一次请求融合为一个向量，强制逐条请求，避免多个切片被错误合并。
+        if (is_array($embeddingMetadata) && $this->isMultimodalEmbeddingMetadata($embeddingMetadata)) {
+            return 1;
+        }
+
         return max(1, min(64, (int) config('geoflow.embedding_batch_size', 1)));
     }
 

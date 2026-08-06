@@ -1,6 +1,7 @@
 @extends('admin.layouts.app')
 
 @php
+    $officialSync = $officialSync ?? [];
     $i18nRoot = $isEdit ? 'admin.article_edit' : 'admin.article_create';
     $formAction = $isEdit
         ? route('admin.articles.update', ['articleId' => (int) $articleId])
@@ -211,6 +212,29 @@
                                 <h3 class="text-lg font-medium text-gray-900">{{ __($i18nRoot.'.section.content_title') }}</h3>
                                 <div class="flex flex-wrap items-center gap-2">
                                     <span class="rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700">{{ __($i18nRoot.'.help.markdown_supported') }}</span>
+                                    @if ($isEdit)
+                                        {{-- 不能嵌套 form：使用外部 #article-official-sync-form --}}
+                                        <button
+                                            type="submit"
+                                            form="article-official-sync-form"
+                                            class="inline-flex items-center rounded-md border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700 shadow-sm hover:border-violet-300 hover:bg-violet-100 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2"
+                                            @disabled(empty($officialSync['can_sync']) && empty($officialSync['official_url']))
+                                        >
+                                            <i data-lucide="upload-cloud" class="mr-1.5 h-4 w-4"></i>
+                                            {{ !empty($officialSync['official_url']) ? __('admin.article_edit.official_sync.button_resync') : __('admin.article_edit.official_sync.button') }}
+                                        </button>
+                                        @if (!empty($officialSync['official_url']))
+                                            <a
+                                                href="{{ $officialSync['official_url'] }}"
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                class="inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 shadow-sm hover:border-emerald-300 hover:bg-emerald-100"
+                                            >
+                                                <i data-lucide="external-link" class="mr-1.5 h-4 w-4"></i>
+                                                {{ __('admin.article_edit.official_sync.open_original') }}
+                                            </a>
+                                        @endif
+                                    @endif
                                     <button
                                         type="button"
                                         id="article-editor-copy-markdown"
@@ -269,6 +293,25 @@
                                 <div class="rounded-md bg-gray-50 px-3 py-2">{{ __('admin.article_editor.help.image') }}</div>
                                 <div class="rounded-md bg-gray-50 px-3 py-2">{{ __('admin.article_editor.help.crop') }}</div>
                             </div>
+                            @if ($isEdit)
+                                <div class="mt-3 rounded-md border border-violet-100 bg-violet-50/50 px-3 py-2 text-xs text-violet-800">
+                                    <div class="font-semibold">{{ __('admin.article_edit.official_sync.panel_title') }}</div>
+                                    <div class="mt-1">
+                                        {{ __('admin.article_edit.official_sync.status_label') }}:
+                                        {{ $officialSync['status'] !== '' ? $officialSync['status'] : __('admin.article_edit.official_sync.status_empty') }}
+                                    </div>
+                                    @if (!empty($officialSync['official_url']))
+                                        <div class="mt-1 break-all">
+                                            {{ __('admin.article_edit.official_sync.url_label') }}:
+                                            <a href="{{ $officialSync['official_url'] }}" target="_blank" rel="noopener noreferrer" class="underline">{{ $officialSync['official_url'] }}</a>
+                                        </div>
+                                    @endif
+                                    @if (!empty($officialSync['last_error_message']))
+                                        <div class="mt-1 text-red-700">{{ $officialSync['last_error_message'] }}</div>
+                                    @endif
+                                    <div class="mt-1 text-violet-700/80">{{ __('admin.article_edit.official_sync.help') }}</div>
+                                </div>
+                            @endif
                         </div>
                     </div>
 
@@ -509,6 +552,10 @@
         @if($isEdit)
             <form id="article-risk-recheck-form" method="POST" action="{{ route('admin.articles.risk-scan', ['articleId' => (int) $articleId]) }}" class="hidden">
                 @csrf
+            </form>
+            <form id="article-official-sync-form" method="POST" action="{{ route('admin.articles.sync-official', ['articleId' => (int) $articleId]) }}" class="hidden">
+                @csrf
+                <input type="hidden" name="force" value="{{ !empty($officialSync['official_url']) ? '1' : '0' }}">
             </form>
         @endif
     </div>

@@ -222,7 +222,7 @@ class AiModelController extends Controller
             $response = $this->safeHttp->post(
                 $request,
                 $endpoint,
-                $this->buildTestPayload($modelName, $modelType, $isGemini),
+                $this->buildTestPayload($modelName, $modelType, $isGemini, (string) ($model->api_url ?? '')),
                 (int) config('geoflow.outbound_ai_max_bytes', 8 * 1024 * 1024),
             );
 
@@ -621,13 +621,20 @@ class AiModelController extends Controller
             return rtrim($providerBaseUrl, '/').'/models/'.$modelName.($modelType === 'embedding' ? ':batchEmbedContents' : ':generateContent');
         }
 
-        return rtrim($providerBaseUrl, '/').($modelType === 'embedding' ? '/embeddings' : '/chat/completions');
+        if ($modelType === 'embedding') {
+            return rtrim($providerBaseUrl, '/').OpenAiRuntimeProvider::resolveEmbeddingEndpointPath(
+                (string) ($model->model_id ?? ''),
+                $apiUrl
+            );
+        }
+
+        return rtrim($providerBaseUrl, '/').'/chat/completions';
     }
 
     /**
      * @return array<string, mixed>
      */
-    private function buildTestPayload(string $modelName, string $modelType, bool $isGemini = false): array
+    private function buildTestPayload(string $modelName, string $modelType, bool $isGemini = false, string $apiUrl = ''): array
     {
         if ($isGemini) {
             if ($modelType === 'embedding') {
@@ -672,6 +679,18 @@ class AiModelController extends Controller
         }
 
         if ($modelType === 'embedding') {
+            if (OpenAiRuntimeProvider::isMultimodalEmbeddingModel($modelName, $apiUrl)) {
+                return [
+                    'model' => $modelName,
+                    'input' => [
+                        [
+                            'type' => 'text',
+                            'text' => 'GEOFlow embedding connection test',
+                        ],
+                    ],
+                ];
+            }
+
             return [
                 'model' => $modelName,
                 'input' => 'GEOFlow embedding connection test',
@@ -715,7 +734,18 @@ class AiModelController extends Controller
         }
 
         if ($modelType === 'embedding') {
-            return isset($json['data'][0]['embedding']) && is_array($json['data'][0]['embedding']);
+            // OpenAI 兼容：data[0].embedding
+            if (isset($json['data'][0]['embedding']) && is_array($json['data'][0]['embedding'])) {
+                return true;
+            }
+
+            // 火山方舟 multimodal：data.embedding（单对象）
+            if (isset($json['data']['embedding']) && is_array($json['data']['embedding'])) {
+                return true;
+            }
+
+            // 少数网关直接返回 embedding 数组
+            return isset($json['embedding']) && is_array($json['embedding']) && array_is_list($json['embedding']);
         }
 
         return isset($json['choices'][0]['message']['content'])

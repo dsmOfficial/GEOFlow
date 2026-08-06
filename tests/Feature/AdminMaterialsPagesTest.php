@@ -68,6 +68,8 @@ class AdminMaterialsPagesTest extends TestCase
             'admin.knowledge-bases.index',
             'admin.url-import',
             'admin.url-import.history',
+            'admin.jiey-flow-import',
+            'admin.jiey-flow-import.history',
         ];
 
         foreach ($routes as $routeName) {
@@ -160,6 +162,14 @@ class AdminMaterialsPagesTest extends TestCase
 
         $this->actingAs($admin, 'admin')
             ->get(route('admin.url-import.history'))
+            ->assertForbidden();
+
+        $this->actingAs($admin, 'admin')
+            ->get(route('admin.jiey-flow-import'))
+            ->assertForbidden();
+
+        $this->actingAs($admin, 'admin')
+            ->get(route('admin.jiey-flow-import.history'))
             ->assertForbidden();
     }
 

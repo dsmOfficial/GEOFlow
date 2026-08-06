@@ -33,6 +33,7 @@ use App\Http\Controllers\Admin\SiteThemeReplicationController;
 use App\Http\Controllers\Admin\SystemUpdateController;
 use App\Http\Controllers\Admin\TaskController;
 use App\Http\Controllers\Admin\TitleLibraryController;
+use App\Http\Controllers\Admin\JieyFlowImportController;
 use App\Http\Controllers\Admin\UrlImportController;
 use App\Http\Controllers\Site\ArchiveController;
 use App\Http\Controllers\Site\ArticleController as SiteArticleController;
@@ -177,6 +178,8 @@ Route::prefix($adminPrefix)->name('admin.')->middleware(['admin.locale'])->group
             Route::post('{articleId}/force-delete', [ArticleController::class, 'forceDelete'])->name('force-delete')->whereNumber('articleId');
             Route::get('{articleId}/edit', [ArticleController::class, 'edit'])->name('edit');
             Route::post('{articleId}/risk-scan', [ArticleController::class, 'recheckRisk'])->name('risk-scan')->whereNumber('articleId');
+            Route::post('{articleId}/sync-official', [ArticleController::class, 'syncOfficial'])->name('sync-official')->whereNumber('articleId');
+            Route::get('{articleId}/official-sync-status', [ArticleController::class, 'officialSyncStatus'])->name('official-sync-status')->whereNumber('articleId');
             Route::post('{articleId}/editor/images/upload', [ArticleEditorAssetController::class, 'uploadImage'])->name('editor.images.upload')->whereNumber('articleId');
             Route::put('{articleId}', [ArticleController::class, 'update'])->name('update');
         });
@@ -296,6 +299,16 @@ Route::prefix($adminPrefix)->name('admin.')->middleware(['admin.locale'])->group
                 ->whereNumber('jobId');
             Route::get('url-import/{jobId}', [UrlImportController::class, 'show'])
                 ->name('url-import.show')
+                ->whereNumber('jobId');
+
+            Route::get('jiey-flow-import', [JieyFlowImportController::class, 'index'])->name('jiey-flow-import');
+            Route::post('jiey-flow-import', [JieyFlowImportController::class, 'store'])->name('jiey-flow-import.store');
+            Route::get('jiey-flow-import/history', [JieyFlowImportController::class, 'history'])->name('jiey-flow-import.history');
+            Route::get('jiey-flow-import/{jobId}/status', [JieyFlowImportController::class, 'status'])
+                ->name('jiey-flow-import.status')
+                ->whereNumber('jobId');
+            Route::get('jiey-flow-import/{jobId}', [JieyFlowImportController::class, 'show'])
+                ->name('jiey-flow-import.show')
                 ->whereNumber('jobId');
         });
 

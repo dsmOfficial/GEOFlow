@@ -33,6 +33,12 @@ class Article extends Model
         'is_hot',
         'is_featured',
         'published_at',
+        'official_external_id',
+        'official_remote_id',
+        'official_url',
+        'official_sync_status',
+        'official_synced_at',
+        'official_last_error',
     ];
 
     protected function casts(): array
@@ -46,6 +52,7 @@ class Article extends Model
             'is_hot' => 'boolean',
             'is_featured' => 'boolean',
             'published_at' => 'datetime',
+            'official_synced_at' => 'datetime',
         ];
     }
 

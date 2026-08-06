@@ -181,8 +181,10 @@
                                 @else
                                     <div class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
                                         @foreach ($knowledgeBases as $knowledgeBaseIndex => $kb)
-                                            @php($knowledgeBaseId = (string) $kb['id'])
-                                            @php($knowledgeBaseInitiallyHidden = $knowledgeBaseIndex >= $visibleKnowledgeBaseLimit && ! in_array($knowledgeBaseId, $selectedKnowledgeBaseIds, true))
+                                            @php
+                                                $knowledgeBaseId = (string) $kb['id'];
+                                                $knowledgeBaseInitiallyHidden = $knowledgeBaseIndex >= $visibleKnowledgeBaseLimit && ! in_array($knowledgeBaseId, $selectedKnowledgeBaseIds, true);
+                                            @endphp
                                             <label data-knowledge-base-card @if($knowledgeBaseInitiallyHidden) data-knowledge-base-collapsed="true" @endif
                                                    @class([
                                                        'flex cursor-pointer items-start gap-3 rounded-md border border-gray-200 px-4 py-3 text-sm transition hover:border-blue-300 hover:bg-blue-50',
@@ -234,7 +236,10 @@
                         <p class="mt-1 text-sm text-gray-600">{{ $t('task_create.section.image_desc') }}</p>
                     </div>
                     <div class="px-6 py-4">
-                        @php($imageCountValue = (string) old('image_count', (string) ($taskForm['image_count'] ?? '1')))
+                        @php
+                            $maxArticleImages = max(0, (int) config('geoflow.max_article_images', 10));
+                            $imageCountValue = (string) old('image_count', (string) ($taskForm['image_count'] ?? '1'));
+                        @endphp
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div>
                                 <label for="image_library_id" class="block text-sm font-medium text-gray-700">{{ $t('task_create.field.image_library') }}</label>
@@ -251,11 +256,9 @@
                                 <label for="image_count" class="block text-sm font-medium text-gray-700">{{ $t('task_create.field.image_count') }}</label>
                                 <select name="image_count" id="image_count" class="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500">
                                     <option value="0" @selected($imageCountValue === '0')>{{ $t('task_create.option.no_image_count') }}</option>
-                                    <option value="1" @selected($imageCountValue === '1')>{{ $t('task_create.option.image_count', ['count' => 1]) }}</option>
-                                    <option value="2" @selected($imageCountValue === '2')>{{ $t('task_create.option.image_count', ['count' => 2]) }}</option>
-                                    <option value="3" @selected($imageCountValue === '3')>{{ $t('task_create.option.image_count', ['count' => 3]) }}</option>
-                                    <option value="4" @selected($imageCountValue === '4')>{{ $t('task_create.option.image_count', ['count' => 4]) }}</option>
-                                    <option value="5" @selected($imageCountValue === '5')>{{ $t('task_create.option.image_count', ['count' => 5]) }}</option>
+                                    @for ($i = 1; $i <= $maxArticleImages; $i++)
+                                        <option value="{{ $i }}" @selected($imageCountValue === (string) $i)>{{ $t('task_create.option.image_count', ['count' => $i]) }}</option>
+                                    @endfor
                                 </select>
                                 <p class="mt-1 text-sm text-gray-500">{{ $t('task_create.help.image_count') }}</p>
                             </div>
@@ -392,8 +395,10 @@
                             </div>
                             <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
                                 @foreach ($distributionChannels as $index => $channel)
-                                    @php($channelId = (string) $channel['id'])
-                                    @php($channelInitiallyHidden = $index >= $visibleDistributionChannelLimit && ! in_array($channelId, $selectedDistributionChannelIds, true))
+                                    @php
+                                        $channelId = (string) $channel['id'];
+                                        $channelInitiallyHidden = $index >= $visibleDistributionChannelLimit && ! in_array($channelId, $selectedDistributionChannelIds, true);
+                                    @endphp
                                     <label data-distribution-channel-card @if($index >= $visibleDistributionChannelLimit) data-distribution-channel-collapsed="true" @endif @class([
                                         'flex items-start gap-3 rounded-md border border-gray-200 px-4 py-3 text-sm transition',
                                         'cursor-pointer hover:border-blue-300 hover:bg-blue-50' => ! $distributionChannelsDisabled,
@@ -456,7 +461,9 @@
                         <h3 class="text-lg font-medium text-gray-900">{{ $t('task_create.section.category_title') }}</h3>
                         <p class="mt-1 text-sm text-gray-600">{{ $t('task_create.section.category_desc') }}</p>
                     </div>
-                    @php($categoryMode = (string) old('category_mode', (string) ($taskForm['category_mode'] ?? 'smart')))
+                    @php
+                        $categoryMode = (string) old('category_mode', (string) ($taskForm['category_mode'] ?? 'smart'));
+                    @endphp
                     <div class="px-6 py-4 space-y-4">
                         <div>
                             <label class="text-base font-medium text-gray-900">{{ $t('task_create.field.category_mode') }}</label>

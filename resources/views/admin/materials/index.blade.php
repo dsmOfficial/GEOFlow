@@ -267,6 +267,10 @@
                             <i data-lucide="globe" class="mr-2 h-4 w-4"></i>
                             {{ __('admin.materials.knowledge_hub_import_from_url') }}
                         </a>
+                        <a href="{{ route('admin.jiey-flow-import') }}" class="inline-flex items-center justify-center rounded-md border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-700 hover:bg-violet-100">
+                            <i data-lucide="boxes" class="mr-2 h-4 w-4"></i>
+                            {{ __('admin.jiey_flow_import.knowledge_hub_import_from_jiey') }}
+                        </a>
                         @endif
                     </div>
                 </div>
@@ -350,6 +354,64 @@
                     <a href="{{ route('admin.url-import.history') }}" class="inline-flex items-center text-sm font-medium text-gray-600 hover:text-gray-800">
                         <i data-lucide="history" class="mr-2 h-4 w-4"></i>
                         {{ __('admin.materials.url_import_history') }}
+                    </a>
+                </div>
+            </div>
+        </section>
+
+        <section class="mb-8 overflow-hidden rounded-lg border border-violet-100 bg-white shadow">
+            <div class="p-6 lg:p-8">
+                <div class="max-w-5xl">
+                    <span class="inline-flex items-center rounded-full bg-violet-50 px-3 py-1 text-sm font-medium text-violet-700">
+                        <i data-lucide="boxes" class="mr-2 h-4 w-4"></i>
+                        {{ __('admin.jiey_flow_import.badge') }}
+                    </span>
+                    <h2 class="mt-5 text-2xl font-bold tracking-tight text-gray-900">{{ __('admin.jiey_flow_import.materials_card_title') }}</h2>
+                    <p class="mt-3 text-sm leading-6 text-gray-600">{{ __('admin.jiey_flow_import.materials_card_desc') }}</p>
+                </div>
+
+                <form method="POST" action="{{ route('admin.jiey-flow-import.store') }}" class="mt-7">
+                    @csrf
+                    <input type="hidden" name="article_type" value="project">
+                    <input type="hidden" name="article_count" value="10">
+                    <label for="quick_jiey_project_id" class="block text-sm font-semibold text-gray-800">{{ __('admin.jiey_flow_import.field.project_id') }}</label>
+                    <div class="mt-3 flex flex-col gap-3 lg:flex-row">
+                        <input
+                            id="quick_jiey_project_id"
+                            name="project_id"
+                            type="number"
+                            min="1"
+                            required
+                            value="{{ old('project_id') }}"
+                            placeholder="{{ __('admin.jiey_flow_import.placeholder.project_id') }}"
+                            class="block min-h-14 w-full rounded-md border-gray-300 px-5 text-base shadow-sm focus:border-violet-500 focus:ring-violet-500"
+                        >
+                        <input
+                            name="project_name"
+                            type="text"
+                            value="{{ old('project_name') }}"
+                            placeholder="{{ __('admin.jiey_flow_import.placeholder.project_name') }}"
+                            class="block min-h-14 w-full rounded-md border-gray-300 px-5 text-base shadow-sm focus:border-violet-500 focus:ring-violet-500 lg:max-w-xs"
+                        >
+                        <button type="submit" class="inline-flex min-h-14 shrink-0 items-center justify-center rounded-md border border-transparent bg-violet-600 px-7 text-base font-semibold text-white shadow-sm hover:bg-violet-700">
+                            <i data-lucide="download-cloud" class="mr-2 h-5 w-5"></i>
+                            {{ __('admin.jiey_flow_import.button.start') }}
+                        </button>
+                    </div>
+                    <p class="mt-2 text-sm text-gray-500">{{ __('admin.jiey_flow_import.help.project_id') }}</p>
+                    @error('project_id')
+                        <p class="mt-2 text-sm text-red-600">{{ $message }}</p>
+                    @enderror
+                </form>
+
+                <div class="mt-5 flex flex-wrap items-center gap-3">
+                    <a href="{{ route('admin.jiey-flow-import') }}" class="inline-flex items-center text-sm font-medium text-violet-700 hover:text-violet-900">
+                        <i data-lucide="settings" class="mr-2 h-4 w-4"></i>
+                        {{ __('admin.jiey_flow_import.materials_entry') }}
+                    </a>
+                    <a href="{{ route('admin.jiey-flow-import.history') }}" class="inline-flex items-center text-sm font-medium text-gray-600 hover:text-gray-800">
+                        <i data-lucide="history" class="mr-2 h-4 w-4"></i>
+                        {{ __('admin.jiey_flow_import.materials_history') }}
                     </a>
                 </div>
             </div>

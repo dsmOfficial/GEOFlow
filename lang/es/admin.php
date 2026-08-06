@@ -20,6 +20,7 @@ return array_replace_recursive($base, [
     'ai_models' => [
         'quick_help' => 'Haz clic para autocompletar configuraciones comunes. Gemini usa la API nativa v1beta de Google; los demás proveedores conservan las reglas compatibles con OpenAI.',
         'gemini_embedding_notice' => 'Gemini Embedding 2 aplica automáticamente prefijos query/document para retrieval; este sistema no admite la configuración task_type de gemini-embedding-001.',
+        'doubao_embedding_vision_notice' => 'Doubao Embedding Vision (doubao-embedding-vision-*) usa automáticamente /embeddings/multimodal de Volcengine Ark con input estructurado {type,text}; los modelos solo de texto (doubao-embedding-text-*) siguen usando /embeddings.',
         'api_url_help' => 'Puedes indicar una URL base o un endpoint completo. Gemini se normaliza a https://generativelanguage.googleapis.com/v1beta; los demás modelos usan las rutas compatibles con OpenAI existentes.',
         'field_max_tokens' => 'Tokens máximos de salida',
         'max_tokens_placeholder' => 'Dejar vacío para usar el valor predeterminado (:tokens)',

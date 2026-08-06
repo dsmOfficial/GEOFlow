@@ -12,9 +12,11 @@ use App\Models\Task;
 use App\Services\GeoFlow\ArticleRiskScanner;
 use App\Services\GeoFlow\ArticleWorkflowTransitionService;
 use App\Services\GeoFlow\DistributionOrchestrator;
+use App\Services\GeoFlow\OfficialArticleSyncService;
 use App\Support\AdminWeb;
 use App\Support\GeoFlow\ArticleWorkflow;
 use Illuminate\Database\QueryException;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -35,6 +37,7 @@ class ArticleController extends Controller
         private readonly DistributionOrchestrator $distributionOrchestrator,
         private readonly ArticleRiskScanner $articleRiskScanner,
         private readonly ArticleWorkflowTransitionService $articleWorkflowTransitionService,
+        private readonly OfficialArticleSyncService $officialArticleSyncService,
     ) {}
 
     /**
@@ -322,8 +325,86 @@ class ArticleController extends Controller
                 'is_featured' => (bool) ($article->is_featured ?? false),
             ],
             'riskScan' => $this->riskScanViewData($article),
+            'officialSync' => $this->officialSyncViewData($article),
             'formOptions' => $this->loadFormOptions(),
         ]);
+    }
+
+    /**
+     * 同步文章到 Jiey 官网 CMS，并回写文末原文链接。
+     */
+    public function syncOfficial(Request $request, int $articleId): RedirectResponse
+    {
+        $article = Article::query()->whereKey($articleId)->firstOrFail();
+        $force = $request->boolean('force');
+
+        \Log::info('geoflow.official_sync.request', [
+            'article_id' => $articleId,
+            'force' => $force,
+            'title' => (string) $article->title,
+        ]);
+
+        try {
+            $result = $this->officialArticleSyncService->sync($article, $force);
+        } catch (Throwable $exception) {
+            \Log::warning('geoflow.official_sync.failed', [
+                'article_id' => $articleId,
+                'message' => $exception->getMessage(),
+            ]);
+
+            return redirect()
+                ->route('admin.articles.edit', ['articleId' => $articleId])
+                ->withErrors(__('admin.article_edit.official_sync.error', [
+                    'message' => $exception->getMessage(),
+                ]));
+        }
+
+        \Log::info('geoflow.official_sync.success', [
+            'article_id' => $articleId,
+            'official_url' => $result['official_url'] ?? null,
+            'remote_id' => $result['remote_id'] ?? null,
+            'action' => $result['action'] ?? null,
+        ]);
+
+        $message = __('admin.article_edit.official_sync.success');
+        if (! empty($result['official_url'])) {
+            $message .= ' '.$result['official_url'];
+        }
+
+        return redirect()
+            ->route('admin.articles.edit', ['articleId' => $articleId])
+            ->with('message', $message);
+    }
+
+    /**
+     * 查询官网同步状态（供前端轮询/调试）。
+     */
+    public function officialSyncStatus(int $articleId): JsonResponse
+    {
+        $article = Article::query()->whereKey($articleId)->firstOrFail();
+
+        return response()->json($this->officialArticleSyncService->status($article));
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function officialSyncViewData(Article $article): array
+    {
+        $status = $this->officialArticleSyncService->status($article);
+
+        return [
+            'status' => (string) ($status['sync_status'] ?? ''),
+            'official_url' => $status['official_url'] ?? null,
+            'remote_id' => $status['remote_id'] ?? null,
+            'external_id' => $status['external_id'] ?? null,
+            'last_error_message' => $status['last_error_message'] ?? null,
+            'synced_at' => $status['synced_at'] ?? null,
+            'source_link_appended' => (bool) ($status['source_link_appended'] ?? false),
+            'can_sync' => (bool) ($status['can_sync'] ?? false),
+            'sync_url' => route('admin.articles.sync-official', ['articleId' => (int) $article->id]),
+            'status_url' => route('admin.articles.official-sync-status', ['articleId' => (int) $article->id]),
+        ];
     }
 
     /**

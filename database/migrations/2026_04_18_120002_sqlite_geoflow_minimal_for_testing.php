@@ -230,6 +230,12 @@ return new class extends Migration
             $table->string('review_status', 20)->default('pending');
             $table->integer('view_count')->default(0);
             $table->integer('is_ai_generated')->default(0);
+            $table->string('official_external_id', 120)->nullable();
+            $table->string('official_remote_id', 120)->nullable();
+            $table->string('official_url', 500)->nullable();
+            $table->string('official_sync_status', 20)->nullable();
+            $table->timestamp('official_synced_at')->nullable();
+            $table->text('official_last_error')->nullable();
             $table->timestamps();
             $table->timestamp('published_at')->nullable();
             $table->softDeletes();

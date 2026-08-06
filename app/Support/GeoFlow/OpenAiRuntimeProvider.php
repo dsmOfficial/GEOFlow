@@ -42,6 +42,10 @@ final class OpenAiRuntimeProvider
 
     /**
      * 将历史或自定义 api_url 规范为 Embeddings 可用的 base（根路径时补全 /v1）。
+     *
+     * 兼容用户粘贴完整 endpoint 的情况：
+     * - .../embeddings
+     * - .../embeddings/multimodal（火山方舟 vision/multimodal 向量模型）
      */
     public static function resolveEmbeddingBaseUrl(string $apiUrl): string
     {
@@ -55,6 +59,9 @@ final class OpenAiRuntimeProvider
             return self::resolveGeminiBaseUrl($normalized);
         }
 
+        if (preg_match('#/embeddings/multimodal$#', $normalized) === 1) {
+            return substr($normalized, 0, -strlen('/embeddings/multimodal'));
+        }
         if (preg_match('#/v1/embeddings$#', $normalized) === 1) {
             return substr($normalized, 0, -strlen('/embeddings'));
         }
@@ -68,6 +75,42 @@ final class OpenAiRuntimeProvider
         }
 
         return $normalized;
+    }
+
+    /**
+     * 判断 embedding 模型是否应走 multimodal 协议。
+     *
+     * 火山方舟 doubao-embedding-vision 等模型不兼容 OpenAI `/embeddings` 的纯文本 input，
+     * 需要调用 `/embeddings/multimodal`，且 input 为 `[{type,text|image_url}, ...]`。
+     * 同一次请求的多个 input 项会被融合为一个向量，因此批量文本切片必须逐条请求。
+     */
+    public static function isMultimodalEmbeddingModel(string $modelId, string $apiUrl = ''): bool
+    {
+        $model = strtolower(trim($modelId));
+        $url = strtolower(trim($apiUrl));
+
+        if ($url !== '' && str_contains($url, '/embeddings/multimodal')) {
+            return true;
+        }
+
+        if ($model === '') {
+            return false;
+        }
+
+        return str_contains($model, 'embedding-vision')
+            || str_contains($model, 'embedding-multimodal')
+            || str_contains($model, 'multimodal-embedding')
+            || str_contains($model, 'vision-embedding');
+    }
+
+    /**
+     * 解析 embedding 请求路径：普通 OpenAI 兼容接口用 /embeddings，multimodal 模型用 /embeddings/multimodal。
+     */
+    public static function resolveEmbeddingEndpointPath(string $modelId, string $apiUrl = ''): string
+    {
+        return self::isMultimodalEmbeddingModel($modelId, $apiUrl)
+            ? '/embeddings/multimodal'
+            : '/embeddings';
     }
 
     /**

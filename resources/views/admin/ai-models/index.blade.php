@@ -237,10 +237,12 @@
                             <button type="button" onclick="fillPreset('openai_embedding')" class="inline-flex items-center px-3 py-1.5 border border-gray-300 rounded-md text-xs font-medium text-gray-700 bg-white hover:bg-gray-50">OpenAI Embedding</button>
                             <button type="button" onclick="fillPreset('gemini_embedding')" class="inline-flex items-center px-3 py-1.5 border border-gray-300 rounded-md text-xs font-medium text-gray-700 bg-white hover:bg-gray-50">Gemini Embedding</button>
                             <button type="button" onclick="fillPreset('volcengine_ark_embedding')" class="inline-flex items-center px-3 py-1.5 border border-gray-300 rounded-md text-xs font-medium text-gray-700 bg-white hover:bg-gray-50">Doubao Embedding</button>
+                            <button type="button" onclick="fillPreset('volcengine_ark_embedding_vision')" class="inline-flex items-center px-3 py-1.5 border border-gray-300 rounded-md text-xs font-medium text-gray-700 bg-white hover:bg-gray-50">Doubao Embedding Vision</button>
                             <button type="button" onclick="fillPreset('zhipu_embedding')" class="inline-flex items-center px-3 py-1.5 border border-gray-300 rounded-md text-xs font-medium text-gray-700 bg-white hover:bg-gray-50">Zhipu Embedding</button>
                         </div>
                         <p class="mt-1 text-xs text-gray-500">{{ __('admin.ai_models.quick_help') }}</p>
                         <p class="mt-2 text-xs text-amber-700">{{ __('admin.ai_models.gemini_embedding_notice') }}</p>
+                        <p class="mt-1 text-xs text-amber-700">{{ __('admin.ai_models.doubao_embedding_vision_notice') }}</p>
                     </div>
 
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -352,6 +354,7 @@
             openai_embedding: {name: 'OpenAI Embedding 3 Small', version: '', model_id: 'text-embedding-3-small', api_url: 'https://api.openai.com', model_type: 'embedding'},
             gemini_embedding: {name: 'Gemini Embedding 2', version: 'v1beta', model_id: 'gemini-embedding-2', api_url: 'https://generativelanguage.googleapis.com/v1beta', model_type: 'embedding'},
             volcengine_ark_embedding: {name: 'Doubao Embedding', version: 'v3', model_id: 'doubao-embedding-text-240515', api_url: 'https://ark.cn-beijing.volces.com/api/v3', model_type: 'embedding'},
+            volcengine_ark_embedding_vision: {name: 'Doubao Embedding Vision', version: 'v3', model_id: 'doubao-embedding-vision-251215', api_url: 'https://ark.cn-beijing.volces.com/api/v3', model_type: 'embedding'},
             zhipu_embedding: {name: '智谱 Embedding-3', version: 'v4', model_id: 'embedding-3', api_url: 'https://open.bigmodel.cn/api/paas/v4', model_type: 'embedding'},
         };
 

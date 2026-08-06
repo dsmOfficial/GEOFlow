@@ -24,9 +24,16 @@ class SmartImportController extends BaseApiController
         $inputData = $request->only([
             'source_type', 'article_type', 'url', 'markdown_content',
             'markdown_name', 'article_count', 'project_name',
-            'project_description', 'model_id',
+            'project_description', 'model_id', 'project_id',
+            'artifact_type_slugs', 'include_unpublished',
         ]);
         $inputData['article_count'] = $articleCount;
+        if (array_key_exists('project_id', $inputData)) {
+            $inputData['project_id'] = max(0, (int) $inputData['project_id']);
+        }
+        if (array_key_exists('include_unpublished', $inputData)) {
+            $inputData['include_unpublished'] = filter_var($inputData['include_unpublished'], FILTER_VALIDATE_BOOLEAN);
+        }
 
         $job = SmartImportJob::query()->create([
             'source_type' => $sourceType,
@@ -39,14 +46,19 @@ class SmartImportController extends BaseApiController
 
         ProcessSmartImportJob::dispatch((int) $job->id)->onQueue('geoflow');
 
-        return $this->success($request, [
+        $payload = [
             'job_id' => (int) $job->id,
             'status' => 'queued',
             'source_type' => $sourceType,
             'article_type' => $articleType,
             'article_count' => $articleCount,
             'created_at' => $job->created_at?->toIso8601String(),
-        ], 202);
+        ];
+        if ($sourceType === 'jiey_flow') {
+            $payload['project_id'] = max(0, (int) ($inputData['project_id'] ?? 0));
+        }
+
+        return $this->success($request, $payload, 202);
     }
 
     /**
@@ -83,8 +95,8 @@ class SmartImportController extends BaseApiController
 
         $fieldErrors = [];
 
-        if (! in_array($sourceType, ['url', 'markdown'], true)) {
-            $fieldErrors['source_type'] = 'source_type 必须是 url 或 markdown';
+        if (! in_array($sourceType, ['url', 'markdown', 'jiey_flow'], true)) {
+            $fieldErrors['source_type'] = 'source_type 必须是 url、markdown 或 jiey_flow';
         }
 
         if (! in_array($articleType, ['jiey_ide', 'project'], true)) {
@@ -105,7 +117,23 @@ class SmartImportController extends BaseApiController
             }
         }
 
-        if ($articleType === 'project') {
+        if ($sourceType === 'jiey_flow') {
+            $projectId = (int) $request->input('project_id', 0);
+            if ($projectId <= 0) {
+                $fieldErrors['project_id'] = 'jiey_flow 模式时 project_id 必须为正整数';
+            }
+
+            if (! (bool) config('geoflow.jiey.enabled', false)) {
+                $fieldErrors['source_type'] = 'Jiey Internal Flow 未启用（请配置 GEOFLOW_JIEY_ENABLED=true）';
+            } else {
+                $secret = (string) config('geoflow.jiey.internal_secret', '');
+                if ($secret === '' || str_contains($secret, 'dev-shared-not-for-prod')) {
+                    $fieldErrors['source_type'] = 'Jiey Internal Flow secret 未配置（GEOFLOW_JIEY_INTERNAL_SECRET）';
+                }
+            }
+        }
+
+        if ($articleType === 'project' && $sourceType !== 'jiey_flow') {
             $projectName = trim((string) $request->input('project_name'));
             if ($projectName === '') {
                 $fieldErrors['project_name'] = 'project 模式建议提供 project_name';

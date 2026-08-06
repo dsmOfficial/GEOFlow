@@ -2381,6 +2381,7 @@ return array_replace_recursive($base, [
         'quick_embedding' => 'Preenchimento Rápido (Embedding)',
         'quick_help' => 'Clique para auto-preencher configurações comuns. Gemini usa a API nativa v1beta do Google; modelos de chat e embedding seguem as regras do provedor para completar o endpoint correto. Volcengine Ark pode usar o nome do modelo ou um Endpoint ID como ep-xxxx.',
         'gemini_embedding_notice' => 'Gemini Embedding 2 aplica automaticamente prefixos de consulta/documento para retrieval; este sistema não oferece suporte à configuração task_type do gemini-embedding-001.',
+        'doubao_embedding_vision_notice' => 'Doubao Embedding Vision (doubao-embedding-vision-*) usa automaticamente /embeddings/multimodal da Volcengine Ark com input estruturado {type,text}; modelos só de texto (doubao-embedding-text-*) continuam em /embeddings.',
         'field_name' => 'Nome do Modelo *',
         'field_version' => 'Versão',
         'field_type' => 'Tipo do Modelo *',

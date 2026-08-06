@@ -20,6 +20,7 @@ class SensitiveAdminRouteAuthorizationTest extends TestCase
             ->filter(static fn (?string $name): bool => is_string($name) && (
                 str_starts_with($name, 'admin.distribution.')
                 || str_starts_with($name, 'admin.url-import')
+                || str_starts_with($name, 'admin.jiey-flow-import')
                 || str_starts_with($name, 'admin.site-settings.theme-replications.')
             ))
             ->values();
@@ -39,6 +40,7 @@ class SensitiveAdminRouteAuthorizationTest extends TestCase
         foreach ([
             route('admin.distribution.index'),
             route('admin.url-import'),
+            route('admin.jiey-flow-import'),
             route('admin.site-settings.theme-replications.create'),
         ] as $url) {
             $this->actingAs($admin, 'admin')->get($url)->assertForbidden();
@@ -52,6 +54,7 @@ class SensitiveAdminRouteAuthorizationTest extends TestCase
 
         $this->actingAs($admin, 'admin')->get(route('admin.distribution.index'))->assertOk();
         $this->actingAs($admin, 'admin')->get(route('admin.url-import'))->assertOk();
+        $this->actingAs($admin, 'admin')->get(route('admin.jiey-flow-import'))->assertOk();
     }
 
     private function admin(string $role): Admin

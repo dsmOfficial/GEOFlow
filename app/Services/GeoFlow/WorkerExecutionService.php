@@ -637,10 +637,29 @@ class WorkerExecutionService
         }
 
         if ($this->isLikelyEnglishPrompt($prompt)) {
-            return 'Knowledge citation rule: when using facts, data, or business judgments from the reference knowledge, cite the evidence ID such as [K1] in the relevant sentence. If the evidence is insufficient, use cautious wording and do not invent sources or conclusions.';
+            return 'Knowledge citation rule: use the reference knowledge to ground facts, data, and business judgments, but do not output evidence IDs such as [K1], [K2], or labels like "Evidence K1" in the final article. If the evidence is insufficient, use cautious wording and do not invent sources or conclusions.';
         }
 
-        return '知识库引用要求：涉及事实、数据或业务判断时，优先依据参考知识中的 [K1] 等证据编号，并在相关句子后标注证据编号；证据不足时不要编造来源或结论。';
+        return '知识库引用要求：请吸收参考知识中的证据内容来支撑事实、数据和业务判断，但最终正文不要输出 [K1]、[K2] 或「证据 K1」等证据编号；证据不足时不要编造来源或结论。';
+    }
+
+    /**
+     * 去掉模型误输出的知识库证据编号，避免出现在前台文章中。
+     *
+     * 参考知识里的 【证据 K1】 仅供模型吸收事实；最终正文不应保留 [K1]/[K2]、
+     * （K1）、【证据 K1】 等标记。
+     */
+    private function stripKnowledgeEvidenceMarkers(string $content): string
+    {
+        $content = preg_replace('/[ \t]*[\[【(（]\s*K\s*\d+\s*[\]】)）]/iu', '', $content) ?? $content;
+        $content = preg_replace('/[ \t]*[\[【]?\s*证据\s*K?\s*\d+\s*[\]】]?/u', '', $content) ?? $content;
+        $content = preg_replace('/[ \t]*[\[【]?\s*Evidence\s*K?\s*\d+\s*[\]】]?/iu', '', $content) ?? $content;
+        $content = preg_replace('/[ \t]{2,}/u', ' ', $content) ?? $content;
+        $content = preg_replace('/ *([，。！？；：、,.!?;:])/u', '$1', $content) ?? $content;
+        $content = preg_replace("/[ \t]+\n/u", "\n", $content) ?? $content;
+        $content = preg_replace("/\n{3,}/u", "\n\n", $content) ?? $content;
+
+        return trim($content);
     }
 
     private function isLikelyEnglishPrompt(string $prompt): bool
@@ -956,6 +975,7 @@ class WorkerExecutionService
 
         $rawContent = (string) ($response->text ?? '');
         $content = OpenAiRuntimeProvider::normalizeGeneratedText($rawContent);
+        $content = $this->stripKnowledgeEvidenceMarkers($content);
         if ($content === '') {
             if (OpenAiRuntimeProvider::looksLikeSseCompletionPayload($rawContent)) {
                 throw new RuntimeException('AI 返回空流式响应，未生成正文内容，请重试或检查模型流式输出兼容性');

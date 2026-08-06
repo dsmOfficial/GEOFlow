@@ -162,6 +162,38 @@ class AdminAiModelsPageTest extends TestCase
             && $request['input'] === 'GEOFlow embedding connection test');
     }
 
+    public function test_admin_can_test_volcengine_multimodal_embedding_model_connection(): void
+    {
+        Http::fake([
+            'https://ark.cn-beijing.volces.com/api/v3/embeddings/multimodal' => Http::response([
+                'data' => [
+                    'embedding' => [0.12, 0.23, 0.34],
+                ],
+            ]),
+        ]);
+
+        $model = $this->createAiModel('embedding', [
+            'name' => 'Doubao Embedding Vision',
+            'model_id' => 'doubao-embedding-vision-251215',
+            'api_url' => 'https://ark.cn-beijing.volces.com/api/v3',
+        ]);
+
+        $response = $this->actingAs($this->createAdmin(), 'admin')
+            ->postJson(route('admin.ai-models.test', ['modelId' => (int) $model->id]));
+
+        $response
+            ->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('meta.model_type', 'embedding')
+            ->assertJsonPath('meta.http_status', 200);
+
+        Http::assertSent(fn ($request): bool => $request->url() === 'https://ark.cn-beijing.volces.com/api/v3/embeddings/multimodal'
+            && $request->hasHeader('Authorization', 'Bearer test-api-key')
+            && $request['model'] === 'doubao-embedding-vision-251215'
+            && ($request['input'][0]['type'] ?? '') === 'text'
+            && ($request['input'][0]['text'] ?? '') === 'GEOFlow embedding connection test');
+    }
+
     public function test_admin_can_test_gemini_chat_model_connection(): void
     {
         Http::fake([
@@ -279,7 +311,10 @@ class AdminAiModelsPageTest extends TestCase
             ->assertSee('Gemini Embedding', false)
             ->assertSee('Doubao Embedding', false)
             ->assertSee('doubao-embedding-text-240515', false)
-            ->assertSee(__('admin.ai_models.gemini_embedding_notice'));
+            ->assertSee('Doubao Embedding Vision', false)
+            ->assertSee('doubao-embedding-vision-251215', false)
+            ->assertSee(__('admin.ai_models.gemini_embedding_notice'))
+            ->assertSee(__('admin.ai_models.doubao_embedding_vision_notice'));
     }
 
     public function test_admin_can_update_knowledge_chunking_config(): void
