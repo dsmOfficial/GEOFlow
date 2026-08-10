@@ -52,7 +52,23 @@ class WorkerExecutionServicePromptTest extends TestCase
         $this->assertStringContainsString('- Article title: What is AI CRM?', $prompt);
         $this->assertStringContainsString('- Core keyword: AI CRM', $prompt);
         $this->assertStringContainsString('Reference knowledge from the business knowledge base.', $prompt);
-        $this->assertStringContainsString('Please output only the final article body in Markdown.', $prompt);
+        $this->assertStringContainsString('Output only the final article body in Markdown.', $prompt);
+        $this->assertStringContainsString('Do not include acknowledgements, role preambles', $prompt);
+    }
+
+    public function test_chinese_prompt_forbids_opening_meta_talk(): void
+    {
+        $prompt = $this->renderContentPrompt(
+            'AI CRM 到底是什么？',
+            'AI CRM',
+            '请写一篇专业、可信、适合 GEO 引用的文章。',
+            ''
+        );
+
+        $this->assertStringContainsString('禁止输出确认语、角色前言、写作过程说明', $prompt);
+        $this->assertStringContainsString('好的，', $prompt);
+        $this->assertStringContainsString('文章如下。', $prompt);
+        $this->assertStringContainsString('作为技术负责人，', $prompt);
     }
 
     public function test_worker_prompt_with_knowledge_context_requires_evidence_ids(): void

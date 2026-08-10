@@ -123,6 +123,13 @@
                         {{ __('admin.knowledge_detail.resubmit_chunks') }}
                     </button>
                 </form>
+                <form method="POST" action="{{ route('admin.knowledge-bases.markdown-assets.generate', ['knowledgeBaseId' => (int) $knowledgeBase->id]) }}" onsubmit="return confirm(@js(__('admin.knowledge_detail.generate_assets_confirm')));">
+                    @csrf
+                    <button type="submit" class="inline-flex w-full items-center justify-center rounded-md border border-purple-200 bg-purple-50 px-4 py-2 text-sm font-medium text-purple-700 hover:bg-purple-100 sm:w-auto" title="{{ __('admin.knowledge_detail.generate_assets_help') }}">
+                        <i data-lucide="wand-sparkles" class="w-4 h-4 mr-2"></i>
+                        {{ __('admin.knowledge_detail.generate_assets') }}
+                    </button>
+                </form>
                 <button type="submit" form="knowledge-detail-form" class="inline-flex items-center justify-center px-4 py-2 border border-transparent rounded-md text-sm text-white bg-orange-600 hover:bg-orange-700">
                     <i data-lucide="save" class="w-4 h-4 mr-2"></i>
                     {{ __('admin.knowledge_detail.save_changes') }}

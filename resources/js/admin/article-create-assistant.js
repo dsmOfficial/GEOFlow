@@ -456,6 +456,66 @@ if (assistantRoot) {
         }
     };
 
+    const isOpeningMetaTalkParagraph = (paragraph) => {
+        const text = String(paragraph || '').trim();
+        if (text === '') {
+            return true;
+        }
+        if (/^#{1,6}\s+\S/.test(text)) {
+            return false;
+        }
+        const compact = text.replace(/\s+/g, '');
+        if (compact.length > 160) {
+            return false;
+        }
+        return (
+            /^好的[，,：:\s]/.test(text)
+            || /文章如下/.test(text)
+            || /正文如下/.test(text)
+            || /根据您的要求/.test(text)
+            || /根据你的要求/.test(text)
+            || /我将.{0,40}(输出|生成|撰写|写)/.test(text)
+            || /我来.{0,40}(输出|生成|撰写|写)/.test(text)
+            || /作为.{0,30}(技术负责人|CTO|产品经理|顾问|开发者|创业者)/.test(text)
+            || /^(Sure|Of course|Certainly|Alright|Okay)[,!.\s]/i.test(text)
+            || /^Here('s| is)\b/i.test(text)
+            || /as (a |an )?(CTO|technical lead|product manager)/i.test(text)
+            || /I will (now )?(write|output|generate|produce)/i.test(text)
+            || /project evaluation article/i.test(text)
+            || /项目评估文章/.test(text)
+        );
+    };
+
+    const stripOpeningMetaTalk = (content) => {
+        const normalized = String(content || '').replace(/\r\n?/g, '\n').trim();
+        if (!normalized) {
+            return '';
+        }
+
+        const paragraphs = normalized.split(/\n{2,}/);
+        let index = 0;
+        while (index < paragraphs.length && isOpeningMetaTalkParagraph(paragraphs[index])) {
+            index += 1;
+        }
+
+        let remaining = index === 0 ? normalized : paragraphs.slice(index).join('\n\n').trim();
+        const lines = remaining.split('\n');
+        let lineIndex = 0;
+        while (lineIndex < lines.length) {
+            const line = lines[lineIndex].trim();
+            if (line === '') {
+                lineIndex += 1;
+                continue;
+            }
+            if (!isOpeningMetaTalkParagraph(line)) {
+                break;
+            }
+            lineIndex += 1;
+        }
+
+        return lines.slice(lineIndex).join('\n').trim();
+    };
+
     const readGenerationStream = async (response) => {
         if (!response.body) {
             throw new Error(messages.networkFailed);
@@ -560,6 +620,7 @@ if (assistantRoot) {
             }
 
             await readGenerationStream(response);
+            generationContent = stripOpeningMetaTalk(generationContent);
             if (generationContent.trim() === '') {
                 throw new Error(messages.emptyContent || messages.failed);
             }

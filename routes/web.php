@@ -279,6 +279,7 @@ Route::prefix($adminPrefix)->name('admin.')->middleware(['admin.locale'])->group
             Route::get('{knowledgeBaseId}/detail', [KnowledgeBaseController::class, 'detail'])->name('detail');
             Route::post('upload', [KnowledgeBaseController::class, 'uploadFile'])->name('upload');
             Route::post('{knowledgeBaseId}/chunks/refresh', [KnowledgeBaseController::class, 'refreshChunks'])->name('chunks.refresh');
+            Route::post('{knowledgeBaseId}/markdown-assets/generate', [KnowledgeBaseController::class, 'generateMarkdownAssets'])->name('markdown-assets.generate');
             Route::put('{knowledgeBaseId}/detail', [KnowledgeBaseController::class, 'updateFromDetail'])->name('detail.update');
             Route::put('{knowledgeBaseId}', [KnowledgeBaseController::class, 'update'])->name('update');
             Route::post('{knowledgeBaseId}/delete', [KnowledgeBaseController::class, 'destroy'])->name('delete');

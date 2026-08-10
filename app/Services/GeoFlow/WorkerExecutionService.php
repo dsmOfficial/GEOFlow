@@ -14,6 +14,7 @@ use App\Models\KnowledgeChunk;
 use App\Models\Prompt;
 use App\Models\Task;
 use App\Models\Title;
+use App\Support\GeoFlow\ArticleGeneratedContentSanitizer;
 use App\Support\GeoFlow\ArticleWorkflow;
 use App\Support\GeoFlow\ImageUrlNormalizer;
 use App\Support\GeoFlow\OpenAiRuntimeProvider;
@@ -618,10 +619,10 @@ class WorkerExecutionService
     private function finalPromptInstruction(string $prompt): string
     {
         if ($this->isLikelyEnglishPrompt($prompt)) {
-            return 'Please output only the final article body in Markdown. Do not repeat the prompt or output placeholders.';
+            return 'Output only the final article body in Markdown. Start directly with the title or first body paragraph. Do not include acknowledgements, role preambles, process notes, or phrases such as "Sure,", "Here is the article,", "As a technical lead,", or "Based on your requirements,". Do not repeat the prompt or output placeholders.';
         }
 
-        return '请直接输出最终文章正文（Markdown），不要重复提示词、不要输出占位符。';
+        return '请直接输出最终文章正文（Markdown），从标题或第一段正文开始写。禁止输出确认语、角色前言、写作过程说明，例如“好的，”“文章如下。”“作为技术负责人，”“根据您的要求生成……”等。不要重复提示词，不要输出占位符。';
     }
 
     private function knowledgeCitationInstruction(string $prompt, string $knowledgeContext): string
@@ -930,6 +931,7 @@ class WorkerExecutionService
 
         $rawContent = (string) ($response->text ?? '');
         $content = OpenAiRuntimeProvider::normalizeGeneratedText($rawContent);
+        $content = ArticleGeneratedContentSanitizer::stripOpeningMetaTalk($content);
         if ($content === '') {
             if (OpenAiRuntimeProvider::looksLikeSseCompletionPayload($rawContent)) {
                 throw new RuntimeException('AI 返回空流式响应，未生成正文内容，请重试或检查模型流式输出兼容性');

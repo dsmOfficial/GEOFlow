@@ -8,6 +8,7 @@ use App\Models\KnowledgeBase;
 use App\Models\KnowledgeChunk;
 use App\Models\Task;
 use App\Services\GeoFlow\KnowledgeChunkSyncCoordinator;
+use App\Services\GeoFlow\MarkdownMaterialAssetService;
 use App\Support\AdminWeb;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Http\RedirectResponse;
@@ -32,7 +33,10 @@ class KnowledgeBaseController extends Controller
 
     private const MAX_DOCX_COMPRESSION_RATIO = 100;
 
-    public function __construct(private readonly KnowledgeChunkSyncCoordinator $chunkSyncCoordinator) {}
+    public function __construct(
+        private readonly KnowledgeChunkSyncCoordinator $chunkSyncCoordinator,
+        private readonly MarkdownMaterialAssetService $markdownMaterialAssetService,
+    ) {}
 
     /**
      * 列表页。
@@ -115,6 +119,39 @@ class KnowledgeBaseController extends Controller
             'admin.knowledge-bases.detail',
             ['knowledgeBaseId' => $knowledgeBaseId],
         );
+    }
+
+    /**
+     * 基于已有知识库正文新建一对关键词库和标题库。
+     */
+    public function generateMarkdownAssets(int $knowledgeBaseId): RedirectResponse
+    {
+        $knowledgeBase = KnowledgeBase::query()->whereKey($knowledgeBaseId)->firstOrFail();
+        $content = trim((string) ($knowledgeBase->content ?? ''));
+        if ($content === '') {
+            return back()->withErrors(__('admin.knowledge_bases.error.content_required'));
+        }
+
+        try {
+            $result = $this->markdownMaterialAssetService->create(
+                (string) $knowledgeBase->name,
+                $content,
+            );
+            $messageKey = $result['fallback_used']
+                ? 'markdown_assets_manual_fallback'
+                : 'markdown_assets_manual_created';
+
+            return redirect()
+                ->route('admin.knowledge-bases.detail', ['knowledgeBaseId' => $knowledgeBaseId])
+                ->with('message', __('admin.knowledge_bases.message.'.$messageKey, [
+                    'keywords' => $result['keywords_count'],
+                    'titles' => $result['titles_count'],
+                ]));
+        } catch (\Throwable $exception) {
+            report($exception);
+
+            return back()->withErrors(__('admin.knowledge_bases.message.markdown_assets_failed'));
+        }
     }
 
     /**
@@ -359,9 +396,9 @@ class KnowledgeBaseController extends Controller
             'risk_level' => ['nullable', 'in:low,medium,high'],
             'review_status' => ['nullable', 'in:unreviewed,reviewed'],
             'import_action' => ['nullable', 'in:save,save_and_chunk'],
-            'knowledge_file' => ['nullable', File::types(['txt', 'md', 'docx'])->max(8 * 1024)],
+            'knowledge_file' => ['nullable', File::types(['txt', 'md', 'markdown', 'docx'])->max(8 * 1024)],
             'knowledge_files' => ['nullable', 'array', 'max:10'],
-            'knowledge_files.*' => ['file', File::types(['txt', 'md', 'docx'])->max(8 * 1024)],
+            'knowledge_files.*' => ['file', File::types(['txt', 'md', 'markdown', 'docx'])->max(8 * 1024)],
         ], [
             'knowledge_file.mimes' => __('admin.knowledge_bases.error.file_type_invalid'),
             'knowledge_file.max' => __('admin.knowledge_bases.error.file_too_large'),
@@ -486,17 +523,37 @@ class KnowledgeBaseController extends Controller
                 ] + $this->knowledgeMetadataPayload($payload));
             });
 
-            if (($payload['import_action'] ?? 'save_and_chunk') === 'save') {
-                return redirect()
-                    ->route('admin.knowledge-bases.index')
-                    ->with('message', __('admin.knowledge_bases.message.create_saved'));
+            $assetMessage = null;
+            if ($this->shouldGenerateMarkdownAssets($manualContent, $uploadedFiles, $parsedFiles)) {
+                try {
+                    $assetResult = $this->markdownMaterialAssetService->create($knowledgeName, $content);
+                    $assetMessage = $assetResult['fallback_used']
+                        ? __('admin.knowledge_bases.message.markdown_assets_fallback')
+                        : __('admin.knowledge_bases.message.markdown_assets_created', [
+                            'keywords' => $assetResult['keywords_count'],
+                            'titles' => $assetResult['titles_count'],
+                        ]);
+                } catch (\Throwable $exception) {
+                    report($exception);
+                    $assetMessage = __('admin.knowledge_bases.message.markdown_assets_failed');
+                }
             }
 
-            return $this->redirectAfterChunkSync(
+            if (($payload['import_action'] ?? 'save_and_chunk') === 'save') {
+                $response = redirect()
+                    ->route('admin.knowledge-bases.index')
+                    ->with('message', __('admin.knowledge_bases.message.create_saved'));
+
+                return $assetMessage !== null ? $response->with('message', $assetMessage) : $response;
+            }
+
+            $response = $this->redirectAfterChunkSync(
                 $knowledgeBase,
                 'admin.knowledge-bases.index',
                 [],
             );
+
+            return $assetMessage !== null ? $response->with('message', $assetMessage) : $response;
         } catch (ValidationException $exception) {
             $this->cleanupKnowledgeFiles($storedPaths);
 
@@ -518,6 +575,24 @@ class KnowledgeBaseController extends Controller
                 ->withInput($request->except(['knowledge_file', 'knowledge_files']))
                 ->withErrors(__('admin.knowledge_bases.message.'.$errorMessageKey, ['message' => $exception->getMessage()]));
         }
+    }
+
+    /**
+     * 仅对单个 Markdown 文件上传生成标题库和关键词库。
+     *
+     * @param  array<int, UploadedFile>  $uploadedFiles
+     * @param  array<int, array{content:string,file_type:string,original_name:string}>  $parsedFiles
+     */
+    private function shouldGenerateMarkdownAssets(string $manualContent, array $uploadedFiles, array $parsedFiles): bool
+    {
+        if ($manualContent !== '' || count($uploadedFiles) !== 1 || count($parsedFiles) !== 1) {
+            return false;
+        }
+
+        $extension = strtolower((string) pathinfo($uploadedFiles[0]->getClientOriginalName(), PATHINFO_EXTENSION));
+
+        return in_array($extension, ['md', 'markdown'], true)
+            && (string) ($parsedFiles[0]['file_type'] ?? '') === 'markdown';
     }
 
     /**
@@ -836,7 +911,7 @@ class KnowledgeBaseController extends Controller
     private function parseUploadedKnowledgeFile(string $absolutePath, string $originalName): array
     {
         $extension = strtolower((string) pathinfo($originalName, PATHINFO_EXTENSION));
-        if ($extension === 'txt' || $extension === 'md') {
+        if ($extension === 'txt' || $extension === 'md' || $extension === 'markdown') {
             $raw = @file_get_contents($absolutePath);
             if ($raw === false) {
                 throw new \RuntimeException(__('admin.knowledge_bases.message.upload_failed'));
@@ -849,7 +924,7 @@ class KnowledgeBaseController extends Controller
 
             return [
                 'content' => $content,
-                'file_type' => $extension === 'md' ? 'markdown' : 'text',
+                'file_type' => in_array($extension, ['md', 'markdown'], true) ? 'markdown' : 'text',
             ];
         }
 

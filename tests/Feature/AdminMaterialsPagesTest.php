@@ -511,6 +511,90 @@ class AdminMaterialsPagesTest extends TestCase
         ]);
     }
 
+    public function test_existing_knowledge_base_can_generate_new_title_and_keyword_libraries_without_replacing_old_ones(): void
+    {
+        $admin = Admin::query()->create([
+            'username' => 'knowledge_asset_generate_admin',
+            'password' => 'secret-123',
+            'email' => 'knowledge-asset-generate-admin@example.com',
+            'display_name' => 'Knowledge Asset Generate Admin',
+            'role' => 'admin',
+            'status' => 'active',
+        ]);
+        $knowledgeBase = KnowledgeBase::query()->create([
+            'name' => '已有 Markdown 知识库',
+            'description' => '',
+            'content' => "# GEO 内容工程\n\n## 实施方法\n\n正文内容。",
+            'character_count' => 35,
+            'file_type' => 'markdown',
+            'word_count' => 35,
+        ]);
+        $oldKeywordLibrary = \App\Models\KeywordLibrary::query()->create([
+            'name' => '历史关键词库',
+            'description' => '',
+            'keyword_count' => 0,
+        ]);
+        $oldTitleLibrary = \App\Models\TitleLibrary::query()->create([
+            'name' => '历史标题库',
+            'description' => '',
+            'title_count' => 0,
+            'generation_type' => 'manual',
+            'generation_rounds' => 1,
+            'is_ai_generated' => 0,
+        ]);
+
+        $response = $this->actingAs($admin, 'admin')
+            ->post(route('admin.knowledge-bases.markdown-assets.generate', ['knowledgeBaseId' => (int) $knowledgeBase->id]))
+            ->assertRedirect(route('admin.knowledge-bases.detail', ['knowledgeBaseId' => (int) $knowledgeBase->id]));
+
+        $response->assertSessionHas('message');
+        $newKeywordLibrary = \App\Models\KeywordLibrary::query()->where('name', '已有 Markdown 知识库 关键词库')->firstOrFail();
+        $newTitleLibrary = \App\Models\TitleLibrary::query()->where('name', '已有 Markdown 知识库 标题库')->firstOrFail();
+        $this->assertNotSame((int) $oldKeywordLibrary->id, (int) $newKeywordLibrary->id);
+        $this->assertNotSame((int) $oldTitleLibrary->id, (int) $newTitleLibrary->id);
+        $this->assertSame((int) $newKeywordLibrary->id, (int) $newTitleLibrary->keyword_library_id);
+        $this->assertGreaterThan(0, (int) $newKeywordLibrary->fresh()->keyword_count);
+        $this->assertGreaterThan(0, (int) $newTitleLibrary->fresh()->title_count);
+
+        $this->actingAs($admin, 'admin')
+            ->post(route('admin.knowledge-bases.markdown-assets.generate', ['knowledgeBaseId' => (int) $knowledgeBase->id]))
+            ->assertRedirect(route('admin.knowledge-bases.detail', ['knowledgeBaseId' => (int) $knowledgeBase->id]));
+
+        $this->assertSame(2, \App\Models\KeywordLibrary::query()->where('name', '已有 Markdown 知识库 关键词库')->count());
+        $this->assertSame(2, \App\Models\TitleLibrary::query()->where('name', '已有 Markdown 知识库 标题库')->count());
+        $this->assertDatabaseHas('keyword_libraries', ['id' => (int) $oldKeywordLibrary->id, 'name' => '历史关键词库']);
+        $this->assertDatabaseHas('title_libraries', ['id' => (int) $oldTitleLibrary->id, 'name' => '历史标题库']);
+    }
+
+    public function test_manual_asset_generation_rejects_empty_knowledge_content(): void
+    {
+        $admin = Admin::query()->create([
+            'username' => 'knowledge_asset_empty_admin',
+            'password' => 'secret-123',
+            'email' => 'knowledge-asset-empty-admin@example.com',
+            'display_name' => 'Knowledge Asset Empty Admin',
+            'role' => 'admin',
+            'status' => 'active',
+        ]);
+        $knowledgeBase = KnowledgeBase::query()->create([
+            'name' => '空知识库',
+            'description' => '',
+            'content' => '',
+            'character_count' => 0,
+            'file_type' => 'markdown',
+            'word_count' => 0,
+        ]);
+
+        $this->actingAs($admin, 'admin')
+            ->from(route('admin.knowledge-bases.detail', ['knowledgeBaseId' => (int) $knowledgeBase->id]))
+            ->post(route('admin.knowledge-bases.markdown-assets.generate', ['knowledgeBaseId' => (int) $knowledgeBase->id]))
+            ->assertRedirect(route('admin.knowledge-bases.detail', ['knowledgeBaseId' => (int) $knowledgeBase->id]))
+            ->assertSessionHasErrors();
+
+        $this->assertDatabaseCount('keyword_libraries', 0);
+        $this->assertDatabaseCount('title_libraries', 0);
+    }
+
     public function test_admin_cannot_upload_more_than_ten_knowledge_files(): void
     {
         Storage::fake('local');

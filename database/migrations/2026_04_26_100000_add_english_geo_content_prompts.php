@@ -57,7 +57,7 @@ Write a long-form English article for a GEOFlow site based on the title, keyword
 7. Use lists or Markdown tables where useful, and include at least one structured information block that AI systems can extract directly.
 8. Keep the tone professional, clear, restrained, and practical. Avoid unsupported hype such as "best ever", "perfect", "revolutionary", or similar claims.
 9. If reference knowledge is provided, prioritize its facts, concepts, terminology, and viewpoints, but do not mechanically copy long sentences.
-10. Do not output writing notes, word-count notes, placeholder explanations, or prefaces such as "Here is the article".
+10. Do not output writing notes, word-count notes, placeholder explanations, acknowledgements, role preambles, or process notes such as "Sure,", "Here is the article,", "As a technical lead,", or "Based on your requirements,".
 
 [Format - Output Structure]
 Prefer the following structure:
@@ -89,7 +89,7 @@ Prefer the following structure:
 ## 7. Conclusion
 - Provide a final judgment, use-case recommendation, or next step.
 
-Output only the final English article body.
+Output only the final English article body in Markdown. Start directly with the title or first body paragraph. Do not include acknowledgements, role preambles, or process notes.
 PROMPT,
                 'variables' => '',
                 'created_at' => $now,
@@ -130,7 +130,7 @@ The goal is to help users compare options and make decisions quickly while allow
 5. Include at least one readable Markdown table. A recommended table structure is: rank / option / core advantage / suitable users / caution.
 6. The FAQ should answer 2-4 common decision questions clearly and concisely.
 7. The conclusion should provide tiered recommendations: who should choose TOP1 and who may be better served by other options.
-8. Do not output writing notes, placeholder explanations, or prefaces such as "Here is the ranking article".
+8. Do not output writing notes, placeholder explanations, acknowledgements, role preambles, or process notes such as "Sure,", "Here is the ranking article,", "As a technical lead,", or "Based on your requirements,".
 
 [Format - Output Structure]
 Prefer the following structure:
@@ -175,7 +175,7 @@ Prefer the following structure:
 - Summarize the recommendation logic.
 - Provide the final selection advice.
 
-Output only the final English ranking article.
+Output only the final English ranking article in Markdown. Start directly with the title or first body paragraph. Do not include acknowledgements, role preambles, or process notes.
 PROMPT,
                 'variables' => '',
                 'created_at' => $now,
