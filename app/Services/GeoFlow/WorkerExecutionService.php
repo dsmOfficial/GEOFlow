@@ -313,6 +313,19 @@ class WorkerExecutionService
      */
     private function resolveAiModel(Task $task): AiModel
     {
+        $aiModel = $this->resolveConfiguredAiModel($task);
+        if (($aiModel->status ?? 'inactive') !== 'active') {
+            throw new RuntimeException('任务 AI 模型不可用');
+        }
+
+        return $aiModel;
+    }
+
+    /**
+     * 读取任务绑定的聊天模型；智能切换会保留停用主模型的尝试记录并继续备用模型。
+     */
+    private function resolveConfiguredAiModel(Task $task): AiModel
+    {
         $aiModelId = (int) ($task->ai_model_id ?? 0);
         if ($aiModelId <= 0) {
             throw new RuntimeException('任务未配置 AI 模型');
@@ -320,7 +333,6 @@ class WorkerExecutionService
 
         $aiModel = AiModel::query()
             ->whereKey($aiModelId)
-            ->where('status', 'active')
             ->where(function ($query): void {
                 $query->whereNull('model_type')
                     ->orWhere('model_type', '')
@@ -389,13 +401,14 @@ class WorkerExecutionService
      */
     private function resolveAiModelCandidates(Task $task): array
     {
-        $primaryModel = $this->resolveAiModel($task);
+        $primaryModel = $this->resolveConfiguredAiModel($task);
         if (($task->model_selection_mode ?? 'fixed') !== 'smart_failover') {
-            return [$primaryModel];
+            return [$this->resolveAiModel($task)];
         }
 
         $fallbackModels = AiModel::query()
             ->whereKeyNot((int) $primaryModel->id)
+            ->where('status', 'active')
             ->where(function ($query): void {
                 $query->whereNull('model_type')
                     ->orWhere('model_type', '')
